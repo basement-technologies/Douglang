@@ -1,0 +1,19 @@
+[package]
+name = "douglang"
+version = "0.1.0"
+edition = "2024"
+description = "Douglang interpreter and compiler"
+
+[[bin]]
+name = "douglang"
+path = "src/main.rs"
+
+[features]
+default = []
+llvm = []
+
+[dependencies]
+tts = "0.26"
+minifb = "0.28"
+image = "0.25"
+ab_glyph = "0.2"

@@ -40,10 +40,10 @@ Doug Notation is similar to Brainfuck's `#!_ <` and `#!_ >`. Don't worry, it's v
 Simple, right? With that in mind, getting to 11:
 
 ```douglang
-DougDougDougDougDoug // 16
-DougDougDoug // -4. Now at 12
-Doug // 1. Now at 13
-DougDoug // -2. Now at 11
+DougDougDougDougDoug D: 16 :D
+DougDougDoug D: -4. Now at 12 :D
+Doug D: 1. Now at 13 :D
+DougDoug D: -2. Now at 11 :D
 ```
 
 And if you want to reset the index back to 0: `#!douglang Bald`. Simple, right? That's how you access variables. But how do you use them?

@@ -1,3 +1,0 @@
-pygame
-pyttsx3
-numpy

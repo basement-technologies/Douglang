@@ -17,3 +17,5 @@ nav:
   - 'hey_doug.md'
   - 'variables.md'
   - 'control_flow.md'
+  - 'ffi.md'
+  - 'compiling.md'

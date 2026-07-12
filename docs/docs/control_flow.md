@@ -15,11 +15,11 @@ loop [
     tts "I'm going to say this forever."
 ]
 ```
-Loops go forever. Why do they go forever? Because if they didn't loop, they wouldn't be a `#!douglang loop`. You can end a loop with `#!douglang break`:
+Loops go forever. Why do they go forever? Because if they didn't loop, they wouldn't be a `#!douglang loop`. You can end a loop with `#!douglang gouD`:
 ```douglang
 loop [
     tts "What is my purpose? Just to loop? Forever?"
-    break // Oh, thank you.
+    gouD D: Oh, thank you. :D
 ]
 ```
 Except now it doesn't loop and therefore doesn't deserve to be called `#!douglang loop`. We can fix this with predictions. 
@@ -39,14 +39,14 @@ The `#!douglang Believers win` block runs whenever the condition is true, becaus
 Combine that with `#!douglang loop` and now you have a loop that doesn't go on forever. I don't know why you would want that, because loops going forever is cool.
 
 ```douglang
-// Laundry alarm
+D: Laundry alarm :D
 Doug set 5
 loop [
     Bald set "Laundry in " +set (Doug) +set "." tts
     Doug -set 1
     prediction (Doug) = 0 [
         Believers win [
-            break
+            gouD
         ]
     ]
 ]
