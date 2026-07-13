@@ -2,7 +2,7 @@ use super::error::RuntimeError;
 use super::value::Value;
 
 #[cfg(windows)]
-pub fn ffi(func_name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+pub fn ffi(func_name: &str, args: &[Value], linked_libs: &[String]) -> Result<Value, RuntimeError> {
     use std::ffi::{CString, c_void};
 
     unsafe extern "system" {
@@ -10,43 +10,65 @@ pub fn ffi(func_name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
         fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
     }
 
-    let candidates = ["msvcrt\0", "kernel32\0"];
     let name_cstring = CString::new(func_name)
         .map_err(|_| RuntimeError::new("invalid function name"))?;
     let name_uds = CString::new(format!("_{func_name}"))
         .map_err(|_| RuntimeError::new("invalid function name"))?;
+    let candidates = [name_cstring.as_ptr() as *const u8, name_uds.as_ptr() as *const u8];
 
-    let mut func_ptr: *mut c_void = std::ptr::null_mut();
-    for lib_name in &candidates {
-        let module = unsafe { LoadLibraryA(lib_name.as_ptr()) };
-        if module.is_null() {
-            continue;
+    let default_libs = ["kernel32", "msvcrt"];
+    let mut modules: Vec<*mut c_void> = Vec::new();
+
+    for lib in default_libs.iter().copied() {
+        let lib_cstr = CString::new(lib.as_bytes())
+            .map_err(|_| RuntimeError::new("invalid library name"))?;
+        let module = unsafe { LoadLibraryA(lib_cstr.as_ptr() as *const u8) };
+        if !module.is_null() {
+            modules.push(module);
         }
-        for cand in [name_cstring.as_ptr() as *const u8, name_uds.as_ptr() as *const u8] {
-            let addr = unsafe { GetProcAddress(module, cand) };
-            if !addr.is_null() {
-                func_ptr = addr;
-                break;
+    }
+
+    for lib in linked_libs {
+        let is_path = lib.contains('/') || lib.contains('\\') || lib.contains(".dll") || lib.contains(".so");
+        if is_path {
+            if let Ok(lib_cstr) = CString::new(lib.as_bytes()) {
+                let module = unsafe { LoadLibraryA(lib_cstr.as_ptr() as *const u8) };
+                if !module.is_null() {
+                    modules.push(module);
+                }
+            }
+        } else {
+            for candidate in [format!("{lib}.dll"), format!("lib{lib}.dll")] {
+                if let Ok(lib_cstr) = CString::new(candidate.as_bytes()) {
+                    let module = unsafe { LoadLibraryA(lib_cstr.as_ptr() as *const u8) };
+                    if !module.is_null() {
+                        modules.push(module);
+                        break;
+                    }
+                }
             }
         }
-        if !func_ptr.is_null() {
-            break;
+    }
+
+    for &module in &modules {
+        for &cand in &candidates {
+            let addr = unsafe { GetProcAddress(module, cand) };
+            if !addr.is_null() {
+                return call_ffi(addr, args);
+            }
         }
     }
 
-    if func_ptr.is_null() {
-        return Err(RuntimeError::new(&format!(
-            "You are literally trolling. FFI function '{}' not found in any linked library.",
-            func_name
-        )));
-    }
-
-    call_ffi(func_ptr, args)
+    Err(RuntimeError::new(&format!(
+        "You are literally trolling. FFI function '{}' not found in any linked library.",
+        func_name
+    )))
 }
 
 #[cfg(not(windows))]
-pub fn ffi(func_name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+pub fn ffi(func_name: &str, args: &[Value], linked_libs: &[String]) -> Result<Value, RuntimeError> {
     use std::ffi::{CString, c_void};
+    use std::ptr;
 
     unsafe extern "C" {
         fn dlopen(filename: *const i8, flags: i32) -> *mut c_void;
@@ -58,45 +80,69 @@ pub fn ffi(func_name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
         .map_err(|_| RuntimeError::new("invalid function name"))?;
     let name_uds = CString::new(format!("_{func_name}"))
         .map_err(|_| RuntimeError::new("invalid function name"))?;
+    let candidates = [name_cstring.as_ptr(), name_uds.as_ptr()];
 
-    let lib_names: &[&str] = &["libc.so.6\0", "libc.dylib\0"];
-    let mut func_ptr: *mut c_void = std::ptr::null_mut();
+    let mut handles: Vec<*mut c_void> = Vec::new();
 
-    for lib_name in lib_names {
-        let handle = unsafe { dlopen(lib_name.as_ptr() as *const i8, RTLD_LAZY) };
-        if handle.is_null() {
-            continue;
+    let default_libs = ["libc.so.6", "libc.dylib"];
+
+    for lib in default_libs.iter().copied() {
+        let lib_cstr = CString::new(lib.as_bytes())
+            .map_err(|_| RuntimeError::new("invalid library name"))?;
+        let handle = unsafe { dlopen(lib_cstr.as_ptr() as *const i8, RTLD_LAZY) };
+        if !handle.is_null() {
+            handles.push(handle);
         }
-        for cand in [name_cstring.as_ptr(), name_uds.as_ptr()] {
+    }
+
+    for lib in linked_libs {
+        let is_path = lib.contains('/') || lib.contains(".so") || lib.contains(".dylib") || lib.contains(".dll");
+        if is_path {
+            if let Ok(lib_cstr) = CString::new(lib.as_bytes()) {
+                let handle = unsafe { dlopen(lib_cstr.as_ptr() as *const i8, RTLD_LAZY) };
+                if !handle.is_null() {
+                    handles.push(handle);
+                }
+            }
+        } else {
+            for pat in [
+                format!("lib{lib}.so"),
+                format!("lib{lib}.so.6"),
+                format!("lib{lib}.so.1"),
+                format!("lib{lib}.dylib"),
+                lib.clone(),
+            ] {
+                if let Ok(lib_cstr) = CString::new(pat.as_bytes()) {
+                    let handle = unsafe { dlopen(lib_cstr.as_ptr() as *const i8, RTLD_LAZY) };
+                    if !handle.is_null() {
+                        handles.push(handle);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for &handle in &handles {
+        for &cand in &candidates {
             let addr = unsafe { dlsym(handle, cand) };
             if !addr.is_null() {
-                func_ptr = addr;
-                break;
-            }
-        }
-        if !func_ptr.is_null() {
-            break;
-        }
-    }
-
-    if func_ptr.is_null() {
-        for cand in [name_cstring.as_ptr(), name_uds.as_ptr()] {
-            let addr = unsafe { dlsym(std::ptr::null_mut(), cand) };
-            if !addr.is_null() {
-                func_ptr = addr;
-                break;
+                return call_ffi(addr, args);
             }
         }
     }
 
-    if func_ptr.is_null() {
-        return Err(RuntimeError::new(&format!(
-            "You are literally trolling. FFI function '{}' not found in any linked library.",
-            func_name
-        )));
+    for &cand in &candidates {
+        let addr = unsafe { dlsym(std::ptr::null_mut(), cand) };
+        if !addr.is_null() {
+            return call_ffi(addr, args);
+        }
     }
 
-    call_ffi(func_ptr, args)
+    Err(RuntimeError::new(&format!(
+        "You are literally trolling. FFI function '{}' not found in any linked library.",
+        func_name
+    )))
 }
 
 fn call_ffi(
@@ -105,7 +151,7 @@ fn call_ffi(
 ) -> Result<Value, RuntimeError> {
     use std::ffi::CString;
 
-    let mut raw: Vec<isize> = Vec::new();
+    let mut raw: Vec<f64> = Vec::new();
     let mut _keepalive: Vec<CString> = Vec::new();
 
     for a in args {
@@ -113,38 +159,38 @@ fn call_ffi(
             Value::Str(s) => {
                 let cs = CString::new(s.as_str())
                     .map_err(|_| RuntimeError::new("ffi string contains null byte"))?;
-                raw.push(cs.as_ptr() as isize);
+                raw.push(cs.as_ptr() as usize as f64);
                 _keepalive.push(cs);
             }
             Value::Float(v) => {
-                raw.push(*v as isize);
+                raw.push(*v);
             }
             Value::Int(v) => {
-                raw.push(*v as isize);
+                raw.push(*v as f64);
             }
         }
     }
 
-    let result: isize = unsafe {
+    let result: f64 = unsafe {
         match raw.len() {
             0 => {
-                let f: extern "C" fn() -> isize = std::mem::transmute(func_ptr);
+                let f: extern "C" fn() -> f64 = std::mem::transmute(func_ptr);
                 f()
             }
             1 => {
-                let f: extern "C" fn(isize) -> isize = std::mem::transmute(func_ptr);
+                let f: extern "C" fn(f64) -> f64 = std::mem::transmute(func_ptr);
                 f(raw[0])
             }
             2 => {
-                let f: extern "C" fn(isize, isize) -> isize = std::mem::transmute(func_ptr);
+                let f: extern "C" fn(f64, f64) -> f64 = std::mem::transmute(func_ptr);
                 f(raw[0], raw[1])
             }
             3 => {
-                let f: extern "C" fn(isize, isize, isize) -> isize = std::mem::transmute(func_ptr);
+                let f: extern "C" fn(f64, f64, f64) -> f64 = std::mem::transmute(func_ptr);
                 f(raw[0], raw[1], raw[2])
             }
             4 => {
-                let f: extern "C" fn(isize, isize, isize, isize) -> isize = std::mem::transmute(func_ptr);
+                let f: extern "C" fn(f64, f64, f64, f64) -> f64 = std::mem::transmute(func_ptr);
                 f(raw[0], raw[1], raw[2], raw[3])
             }
             _ => {

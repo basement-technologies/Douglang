@@ -15,15 +15,17 @@ pub struct Interpreter {
     val_right: Vec<Value>,
     val_i: i64,
     tts: Arc<Tts>,
+    linked_libs: Vec<String>,
 }
 
 impl Interpreter {
-    pub fn new(tts: Arc<Tts>) -> Self {
+    pub fn new(tts: Arc<Tts>, linked_libs: Vec<String>) -> Self {
         Interpreter {
             val_left: Vec::new(),
             val_right: vec![Value::Int(0)],
             val_i: 0,
             tts,
+            linked_libs,
         }
     }
 
@@ -219,7 +221,7 @@ impl Interpreter {
                         .iter()
                         .map(|a| self.eval_expr(a))
                         .collect::<Result<_, _>>()?;
-                    let result = ffi::ffi(func_name, &arg_val)?;
+                    let result = ffi::ffi(func_name, &arg_val, &self.linked_libs)?;
                     self.set_val(self.val_i, result)?;
                 }
 

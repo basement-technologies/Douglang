@@ -48,7 +48,6 @@ impl<'a> Parser<'a> {
         let mut nodes: Vec<Stmt> = Vec::new();
 
         while let Some(token) = self.next() {
-            let span = token.span;
             match &token.kind {
                 TokenKind::Tts | TokenKind::Ttss => {
                     let overlap = matches!(token.kind, TokenKind::Ttss);
@@ -117,8 +116,8 @@ impl<'a> Parser<'a> {
                         Some(t) if matches!(t.kind, TokenKind::LSquare) => {}
                         Some(t) => {
                             return Err(ParseErr::new(
-                                t.span.line,
-                                t.span.column,
+                                t.line,
+                                t.column,
                                 &format!("expected [, got {}", token_name(&t.kind)),
                             ));
                         }
@@ -142,8 +141,8 @@ impl<'a> Parser<'a> {
                         Some(t) if matches!(t.kind, TokenKind::LSquare) => {}
                         Some(t) => {
                             return Err(ParseErr::new(
-                                t.span.line,
-                                t.span.column,
+                                t.line,
+                                t.column,
                                 &format!("expected [, got {}", token_name(&t.kind)),
                             ));
                         }
@@ -167,8 +166,8 @@ impl<'a> Parser<'a> {
                         }
                         Some(t) => {
                             return Err(ParseErr::new(
-                                t.span.line,
-                                t.span.column,
+                                t.line,
+                                t.column,
                                 "expected BelieversToken or DoubtersToken at start of prediction block",
                             ));
                         }
@@ -185,8 +184,8 @@ impl<'a> Parser<'a> {
                         Some(t) if matches!(t.kind, TokenKind::Win) => {}
                         Some(t) => {
                             return Err(ParseErr::new(
-                                t.span.line,
-                                t.span.column,
+                                t.line,
+                                t.column,
                                 &format!("expected win, got {}", token_name(&t.kind)),
                             ));
                         }
@@ -217,10 +216,10 @@ impl<'a> Parser<'a> {
                         if std::mem::discriminant(&token_kind2)
                             == std::mem::discriminant(&token_kind1)
                         {
-                            let span = self.tokens[self.i as usize].span;
+                            let tok = &self.tokens[self.i as usize];
                             return Err(ParseErr::new(
-                                span.line,
-                                span.column,
+                                tok.line,
+                                tok.column,
                                 "second branch must be opposite of first in prediction",
                             ));
                         }
@@ -229,8 +228,8 @@ impl<'a> Parser<'a> {
                             Some(t) if matches!(t.kind, TokenKind::Win) => {}
                             Some(t) => {
                                 return Err(ParseErr::new(
-                                    t.span.line,
-                                    t.span.column,
+                                    t.line,
+                                    t.column,
                                     &format!("expected win, got {}", token_name(&t.kind)),
                                 ));
                             }
@@ -256,8 +255,8 @@ impl<'a> Parser<'a> {
                         Some(t) if matches!(t.kind, TokenKind::RSquare) => {}
                         Some(t) => {
                             return Err(ParseErr::new(
-                                t.span.line,
-                                t.span.column,
+                                t.line,
+                                t.column,
                                 "expected ] to close prediction block",
                             ));
                         }
@@ -282,13 +281,13 @@ impl<'a> Parser<'a> {
                 }
 
                 TokenKind::Rigged => {
-                    let (func_name, name_span) = match self.next() {
+                    let func_name = match self.next() {
                         Some(t) => match &t.kind {
-                            TokenKind::Literal(ValueLiteral::Str(s)) => (s.clone(), t.span),
+                            TokenKind::Literal(ValueLiteral::Str(s)) => s.clone(),
                             other => {
                                 return Err(ParseErr::new(
-                                    t.span.line,
-                                    t.span.column,
+                                    t.line,
+                                    t.column,
                                     &format!(
                                         "expected function after Rigged, got {}",
                                         token_name(other)
@@ -304,7 +303,6 @@ impl<'a> Parser<'a> {
                             ));
                         }
                     };
-                    let _ = name_span;
 
                     let mut args: Vec<Expr> = Vec::new();
                     loop {
@@ -334,7 +332,7 @@ impl<'a> Parser<'a> {
 
                 TokenKind::RSquare => {
                     if is_top {
-                        return Err(ParseErr::new(span.line, span.column, "unexpected ]"));
+                        return Err(ParseErr::new(token.line, token.column, "unexpected ]"));
                     }
                     return Ok(nodes);
                 }
@@ -375,8 +373,8 @@ impl<'a> Parser<'a> {
                 TokenKind::RParen => return Ok(dougs),
                 other => {
                     return Err(ParseErr::new(
-                        token.span.line,
-                        token.span.column,
+                        token.line,
+                        token.column,
                         &format!("expected DougToken or ), got {}", token_name(other)),
                     ));
                 }
@@ -399,8 +397,8 @@ impl<'a> Parser<'a> {
                 TokenKind::Literal(value) => Expr::Literal(value.clone()),
                 other => {
                     return Err(ParseErr::new(
-                        t.span.line,
-                        t.span.column,
+                        t.line,
+                        t.column,
                         &format!("expected expression, got {}", token_name(other)),
                     ));
                 }
@@ -419,8 +417,8 @@ impl<'a> Parser<'a> {
                 Some(oper) => oper,
                 None => {
                     return Err(ParseErr::new(
-                        t.span.line,
-                        t.span.column,
+                        t.line,
+                        t.column,
                         &format!(
                             "expected comparison operator, got {}",
                             token_name(&t.kind)
@@ -446,8 +444,8 @@ impl<'a> Parser<'a> {
                 TokenKind::Literal(value) => Expr::Literal(value.clone()),
                 other => {
                     return Err(ParseErr::new(
-                        t.span.line,
-                        t.span.column,
+                        t.line,
+                        t.column,
                         &format!("expected expression, got {}", token_name(other)),
                     ));
                 }

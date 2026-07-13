@@ -6,4 +6,10 @@
 # mkdocs documentation
 /site
 
-out.c
+!runtime.c
+*.c
+*.exe
+*.out
+*.ilk
+*.obj
+*.pdb

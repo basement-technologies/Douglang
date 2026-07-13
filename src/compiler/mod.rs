@@ -73,16 +73,16 @@ impl Compiler {
     fn ffi_arg(&mut self, expr: &Expr) -> String {
         match expr {
             Expr::Literal(lit) => match lit {
-                ValueLiteral::Str(s) => Self::cstring_literal(s),
-                ValueLiteral::Float(v) => format!("(double){v:?}"),
-                ValueLiteral::Int(v) => format!("(long long){v}LL"),
+                ValueLiteral::Str(s) => format!("(double)(size_t){}", Self::cstring_literal(s)),
+                ValueLiteral::Float(v) => format!("({v:?})"),
+                ValueLiteral::Int(v) => format!("(double)({v}LL)"),
             },
             Expr::DougSequence { .. } => {
                 let val = self.eval_expr(expr);
                 let t = self.new_tmp_var();
                 self.emit(&format!("DougValue {t} = {val};"));
                 format!(
-                    "(({t}).kind == DV_STRING ? (long long)(size_t)dv_as_cstr({t}) : dv_as_int({t}))"
+                    "(({t}).kind == DV_STRING ? (double)(size_t)dv_as_cstr({t}) : dv_as_double({t}))"
                 )
             }
         }
@@ -215,18 +215,33 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&mut self, nodes: &[Stmt]) -> String {
+    pub fn compile(&mut self, nodes: &[Stmt], linked_libs: &[String]) -> String {
         self.comp_block(nodes);
 
         let body = self.lines.join("\n");
 
+        let mut includes = String::new();
+        for lib in linked_libs {
+            if let Ok(output) = std::process::Command::new("pkg-config")
+                .args(["--cflags", lib])
+                .output()
+            {
+                if output.status.success() {
+                    if let Ok(out) = String::from_utf8(output.stdout) {
+                        includes.push_str(&out);
+                    }
+                }
+            }
+        }
+
         let mut decls = String::new();
-        for name in self.funcs.keys() {
-            decls.push_str(&format!("extern int {name}();\n"));
+        for (name, argc) in &self.funcs {
+            let params = (0..*argc).map(|_| "double").collect::<Vec<_>>().join(", ");
+            decls.push_str(&format!("extern double {name}({params});\n"));
         }
 
         format!(
-            "{RUNTIME}\n{decls}\nint main(void) {{\n    dv_ensure(&dv_right, &dv_right_len, 0);\n{body}\n    return 0;\n}}\n"
+            "{RUNTIME}\n{includes}{decls}\nint main(void) {{\n    dv_ensure(&dv_right, &dv_right_len, 0);\n{body}\n    return 0;\n}}\n"
         )
     }
 }
