@@ -8,7 +8,7 @@ A programming language based on [that one pepper guy](https://youtube.com/@DougD
 
 # Learn
 
-There's [documentation](https://tristan829.github.io/Douglang). If you want to write Douglang code, you *have* to read it given the eccentric features. Go on, it won't bite.
+There's [documentation](https://basement-technologies.github.io/Douglang). If you want to write Douglang code, you *have* to read it given the eccentric features. Go on, it won't bite.
 
 # Features
 
