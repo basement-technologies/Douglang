@@ -121,6 +121,7 @@ fn main() {
             ];
 
             for lib in &linked_libs {
+                if lib.ends_with(".c") { continue; }
                 let is_path = lib.contains('/') || lib.contains('\\')
                     || lib.ends_with(".dll") || lib.ends_with(".so") || lib.ends_with(".a") || lib.ends_with(".dylib");
                 if is_path {

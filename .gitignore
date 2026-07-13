@@ -7,7 +7,7 @@
 /site
 
 !runtime.c
-*.c
+/*.c
 *.exe
 *.out
 *.ilk

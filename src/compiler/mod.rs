@@ -220,6 +220,16 @@ impl Compiler {
 
         let body = self.lines.join("\n");
 
+        let mut embedded = String::new();
+        for lib in linked_libs {
+            if lib.ends_with(".c") {
+                if let Ok(content) = std::fs::read_to_string(lib) {
+                    embedded.push_str(&content.replace("__declspec(dllexport) ", ""));
+                    embedded.push('\n');
+                }
+            }
+        }
+
         let mut includes = String::new();
         for lib in linked_libs {
             if let Ok(output) = std::process::Command::new("pkg-config")
@@ -241,7 +251,7 @@ impl Compiler {
         }
 
         format!(
-            "{RUNTIME}\n{includes}{decls}\nint main(void) {{\n    dv_ensure(&dv_right, &dv_right_len, 0);\n{body}\n    return 0;\n}}\n"
+            "{RUNTIME}\n{embedded}{includes}{decls}\nint main(void) {{\n    dv_ensure(&dv_right, &dv_right_len, 0);\n{body}\n    return 0;\n}}\n"
         )
     }
 }
