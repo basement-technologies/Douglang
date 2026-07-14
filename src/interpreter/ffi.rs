@@ -149,10 +149,11 @@ fn call_ffi(
     func_ptr: *mut std::ffi::c_void,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
+    use libffi::high::call::*;
     use std::ffi::CString;
 
     let mut raw: Vec<f64> = Vec::new();
-    let mut _keepalive: Vec<CString> = Vec::new();
+    let mut keepalive: Vec<CString> = Vec::new();
 
     for a in args {
         match a {
@@ -160,7 +161,7 @@ fn call_ffi(
                 let cs = CString::new(s.as_str())
                     .map_err(|_| RuntimeError::new("ffi string contains null byte"))?;
                 raw.push(cs.as_ptr() as usize as f64);
-                _keepalive.push(cs);
+                keepalive.push(cs);
             }
             Value::Float(v) => {
                 raw.push(*v);
@@ -171,33 +172,8 @@ fn call_ffi(
         }
     }
 
-    let result: f64 = unsafe {
-        match raw.len() {
-            0 => {
-                let f: extern "C" fn() -> f64 = std::mem::transmute(func_ptr);
-                f()
-            }
-            1 => {
-                let f: extern "C" fn(f64) -> f64 = std::mem::transmute(func_ptr);
-                f(raw[0])
-            }
-            2 => {
-                let f: extern "C" fn(f64, f64) -> f64 = std::mem::transmute(func_ptr);
-                f(raw[0], raw[1])
-            }
-            3 => {
-                let f: extern "C" fn(f64, f64, f64) -> f64 = std::mem::transmute(func_ptr);
-                f(raw[0], raw[1], raw[2])
-            }
-            4 => {
-                let f: extern "C" fn(f64, f64, f64, f64) -> f64 = std::mem::transmute(func_ptr);
-                f(raw[0], raw[1], raw[2], raw[3])
-            }
-            _ => {
-                return Err(RuntimeError::new("ffi calls with 4+ arguments are not supported"));
-            }
-        }
-    };
+    let fn_args: Vec<Arg<'_>> = raw.iter().map(|v| arg(v)).collect();
+    let result: f64 = unsafe { call::<f64>(CodePtr(func_ptr), &fn_args) };
 
     Ok(Value::Int(result as i64))
 }

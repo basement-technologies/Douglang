@@ -2,11 +2,11 @@ D: definitely a counting demo :D
 
 Bald Doug set 0
 Bald DougDoug set 3
-Bald Doug Rigged "pow" (DougDoug) (DougDoug)
+Bald Doug set (Rigged "pow" (DougDoug) (DougDoug))
 Bald set "3^3 = " +set (Doug) tts
 
 Bald Doug set 9
-Bald Doug Rigged "sqrt" (Doug)
+Bald Doug set (Rigged "sqrt" (Doug))
 Bald set "sqrt(9) = " +set (Doug) tts
 
 Bald set "done!" tts

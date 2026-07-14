@@ -77,7 +77,7 @@ impl Compiler {
                 ValueLiteral::Float(v) => format!("({v:?})"),
                 ValueLiteral::Int(v) => format!("(double)({v}LL)"),
             },
-            Expr::DougSequence { .. } => {
+            _ => {
                 let val = self.eval_expr(expr);
                 let t = self.new_tmp_var();
                 self.emit(&format!("DougValue {t} = {val};"));
@@ -88,7 +88,7 @@ impl Compiler {
         }
     }
 
-    fn eval_expr(&self, expr: &Expr) -> String {
+    fn eval_expr(&mut self, expr: &Expr) -> String {
         match expr {
             Expr::Literal(lit) => match lit {
                 ValueLiteral::Str(s) => {
@@ -100,6 +100,13 @@ impl Compiler {
             Expr::DougSequence { chains } => {
                 let idx = Self::doug_index(chains, "0LL");
                 format!("dv_get({idx})")
+            }
+            Expr::Rigged { func: func_name, args } => {
+                self.funcs.insert(func_name.clone(), args.len());
+                let call_args: Vec<String> =
+                    args.iter().map(|a| self.ffi_arg(a)).collect();
+                let joined = call_args.join(", ");
+                format!("dv_make_int((long long){func_name}({joined}))")
             }
         }
     }
@@ -183,16 +190,6 @@ impl Compiler {
 
                 Stmt::Goud => {
                     self.emit("break;");
-                }
-
-                Stmt::Rigged { func: func_name, args } => {
-                    self.funcs.insert(func_name.clone(), args.len());
-                    let call_args: Vec<String> =
-                        args.iter().map(|a| self.ffi_arg(a)).collect();
-                    let joined = call_args.join(", ");
-                    self.emit(&format!(
-                        "dv_set(dv_index, dv_make_int((long long){func_name}({joined})));"
-                    ));
                 }
 
                 Stmt::Prediction {

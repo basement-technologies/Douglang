@@ -63,9 +63,9 @@ impl<'a> Parser<'a> {
                         }
                         Some(TokenKind::LParen) => {
                             self.next();
-                            let chains = self.parse_expr()?;
+                            let expr = self.parse_expr()?;
                             nodes.push(Stmt::Tts {
-                                msg: Some(Expr::DougSequence { chains }),
+                                msg: Some(expr),
                                 use_index: false,
                                 overlap,
                             });
@@ -95,9 +95,9 @@ impl<'a> Parser<'a> {
                             });
                         }
                         Some(TokenKind::LParen) => {
-                            let chains = self.parse_expr()?;
+                            let expr = self.parse_expr()?;
                             nodes.push(Stmt::Set {
-                                value: Expr::DougSequence { chains },
+                                value: expr,
                                 oper,
                             });
                         }
@@ -280,56 +280,6 @@ impl<'a> Parser<'a> {
                     nodes.push(Stmt::Goud);
                 }
 
-                TokenKind::Rigged => {
-                    let func_name = match self.next() {
-                        Some(t) => match &t.kind {
-                            TokenKind::Literal(ValueLiteral::Str(s)) => s.clone(),
-                            other => {
-                                return Err(ParseErr::new(
-                                    t.line,
-                                    t.column,
-                                    &format!(
-                                        "expected function after Rigged, got {}",
-                                        token_name(other)
-                                    ),
-                                ));
-                            }
-                        },
-                        None => {
-                            return Err(ParseErr::new(
-                                self.i as usize,
-                                0,
-                                "expected function after Rigged, got end of input",
-                            ));
-                        }
-                    };
-
-                    let mut args: Vec<Expr> = Vec::new();
-                    loop {
-                        match self.check_next().map(|t| &t.kind) {
-                            Some(TokenKind::LParen) => {
-                                self.next();
-                                let chains = self.parse_expr()?;
-                                args.push(Expr::DougSequence { chains });
-                            }
-                            Some(TokenKind::Literal(value)) => {
-                                let value = value.clone();
-                                self.next();
-                                args.push(Expr::Literal(value));
-                            }
-                            Some(TokenKind::Doug { count }) => {
-                                let count = *count;
-                                self.next();
-                                args.push(Expr::DougSequence {
-                                    chains: vec![DougChain { count }],
-                                });
-                            }
-                            _ => break,
-                        }
-                    }
-                    nodes.push(Stmt::Rigged { func: func_name, args });
-                }
-
                 TokenKind::RSquare => {
                     if is_top {
                         return Err(ParseErr::new(token.line, token.column, "unexpected ]"));
@@ -365,35 +315,88 @@ impl<'a> Parser<'a> {
         Stmt::Doug { chains, reset }
     }
 
-    fn parse_expr(&mut self) -> Result<Vec<DougChain>, ParseErr> {
-        let mut dougs: Vec<DougChain> = Vec::new();
-        while let Some(token) = self.next() {
-            match &token.kind {
-                TokenKind::Doug { count } => dougs.push(DougChain { count: *count }),
-                TokenKind::RParen => return Ok(dougs),
-                other => {
-                    return Err(ParseErr::new(
-                        token.line,
-                        token.column,
-                        &format!("expected DougToken or ), got {}", token_name(other)),
-                    ));
+    fn parse_expr(&mut self) -> Result<Expr, ParseErr> {
+        match self.check_next().map(|t| &t.kind) {
+            Some(TokenKind::Rigged) => {
+                self.next();
+                let func_name = match self.next() {
+                    Some(t) => match &t.kind {
+                        TokenKind::Literal(ValueLiteral::Str(s)) => s.clone(),
+                        other => {
+                            return Err(ParseErr::new(
+                                t.line,
+                                t.column,
+                                &format!("expected function after Rigged, got {}", token_name(other)),
+                            ));
+                        }
+                    },
+                    None => {
+                        return Err(ParseErr::new(
+                            self.i as usize,
+                            0,
+                            "expected function after Rigged, got end of input",
+                        ));
+                    }
+                };
+                let mut args: Vec<Expr> = Vec::new();
+                loop {
+                    match self.check_next().map(|t| &t.kind) {
+                        Some(TokenKind::LParen) => {
+                            self.next();
+                            args.push(self.parse_expr()?);
+                        }
+                        Some(TokenKind::Literal(value)) => {
+                            args.push(Expr::Literal(value.clone()));
+                            self.next();
+                        }
+                        Some(TokenKind::Doug { count }) => {
+                            args.push(Expr::DougSequence {
+                                chains: vec![DougChain { count: *count }],
+                            });
+                            self.next();
+                        }
+                        Some(TokenKind::RParen) => {
+                            self.next();
+                            return Ok(Expr::Rigged { func: func_name, args });
+                        }
+                        other => {
+                            return Err(ParseErr::new(
+                                self.i as usize,
+                                0,
+                                &format!("expected argument or ), got {}", token_name(other.unwrap_or(&TokenKind::Goud))),
+                            ));
+                        }
+                    }
                 }
             }
+            _ => {
+                let mut dougs: Vec<DougChain> = Vec::new();
+                while let Some(token) = self.next() {
+                    match &token.kind {
+                        TokenKind::Doug { count } => dougs.push(DougChain { count: *count }),
+                        TokenKind::RParen => return Ok(Expr::DougSequence { chains: dougs }),
+                        other => {
+                            return Err(ParseErr::new(
+                                token.line,
+                                token.column,
+                                &format!("expected DougToken or ), got {}", token_name(other)),
+                            ));
+                        }
+                    }
+                }
+                Err(ParseErr::new(
+                    self.i as usize,
+                    0,
+                    "expected DougToken or ), got end of input",
+                ))
+            }
         }
-        Err(ParseErr::new(
-            self.i as usize,
-            0,
-            "expected DougToken or ), got end of input",
-        ))
     }
 
     fn parse_cond(&mut self) -> Result<Condition, ParseErr> {
         let left = match self.next() {
             Some(t) => match &t.kind {
-                TokenKind::LParen => {
-                    let chains = self.parse_expr()?;
-                    Expr::DougSequence { chains }
-                }
+                TokenKind::LParen => self.parse_expr()?,
                 TokenKind::Literal(value) => Expr::Literal(value.clone()),
                 other => {
                     return Err(ParseErr::new(
@@ -437,10 +440,7 @@ impl<'a> Parser<'a> {
 
         let right = match self.next() {
             Some(t) => match &t.kind {
-                TokenKind::LParen => {
-                    let chains = self.parse_expr()?;
-                    Expr::DougSequence { chains }
-                }
+                TokenKind::LParen => self.parse_expr()?,
                 TokenKind::Literal(value) => Expr::Literal(value.clone()),
                 other => {
                     return Err(ParseErr::new(

@@ -92,6 +92,13 @@ impl Interpreter {
                 let idx = self.get_index(chains, 0);
                 Ok(self.get_val(idx))
             }
+            Expr::Rigged { func: func_name, args } => {
+                let arg_val: Vec<Value> = args
+                    .iter()
+                    .map(|a| self.eval_expr(a))
+                    .collect::<Result<_, _>>()?;
+                ffi::ffi(func_name, &arg_val, &self.linked_libs)
+            }
         }
     }
 
@@ -214,15 +221,6 @@ impl Interpreter {
                     return Err(RuntimeError {
                         message: "__break__".to_string(),
                     });
-                }
-
-                Stmt::Rigged { func: func_name, args } => {
-                    let arg_val: Vec<Value> = args
-                        .iter()
-                        .map(|a| self.eval_expr(a))
-                        .collect::<Result<_, _>>()?;
-                    let result = ffi::ffi(func_name, &arg_val, &self.linked_libs)?;
-                    self.set_val(self.val_i, result)?;
                 }
 
                 Stmt::Prediction {
