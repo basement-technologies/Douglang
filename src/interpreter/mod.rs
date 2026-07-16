@@ -217,7 +217,7 @@ impl Interpreter {
                     }
                 },
 
-                Stmt::Goud => {
+                Stmt::Guod => {
                     return Err(RuntimeError {
                         message: "__break__".to_string(),
                     });

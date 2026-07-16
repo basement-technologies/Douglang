@@ -38,7 +38,7 @@ pub fn token_name(kind: &TokenKind) -> &'static str {
         TokenKind::DivSet => "DivSetToken",
         TokenKind::ModSet => "ModSetToken",
         TokenKind::Loop => "LoopToken",
-        TokenKind::Goud => "GoudToken",
+        TokenKind::Guod => "GuodToken",
         TokenKind::Rigged => "RiggedToken",
         TokenKind::Prediction => "PredictionToken",
         TokenKind::Believers => "BelieversToken",

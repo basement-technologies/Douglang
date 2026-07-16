@@ -60,7 +60,7 @@ pub enum Stmt {
     Loop {
         body: Vec<Stmt>,
     },
-    Goud,
+    Guod,
     Prediction {
         believe_body: Vec<Stmt>,
         doubt_body: Vec<Stmt>,

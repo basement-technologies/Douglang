@@ -188,7 +188,7 @@ impl Compiler {
                     self.emit("}");
                 }
 
-                Stmt::Goud => {
+                Stmt::Guod => {
                     self.emit("break;");
                 }
 

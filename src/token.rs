@@ -31,7 +31,7 @@ pub enum TokenKind {
     DivSet,
     ModSet,
     Loop,
-    Goud,
+    Guod,
     Rigged,
     Prediction,
     Believers,

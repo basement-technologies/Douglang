@@ -15,11 +15,11 @@ loop [
     tts "I'm going to say this forever."
 ]
 ```
-Loops go forever. Why do they go forever? Because if they didn't loop, they wouldn't be a `#!douglang loop`. You can end a loop with `#!douglang gouD`:
+Loops go forever. Why do they go forever? Because if they didn't loop, they wouldn't be a `#!douglang loop`. You can end a loop with `#!douglang guoD`:
 ```douglang
 loop [
     tts "What is my purpose? Just to loop? Forever?"
-    gouD D: Oh, thank you. :D
+    guoD D: Oh, thank you. :D
 ]
 ```
 Except now it doesn't loop and therefore doesn't deserve to be called `#!douglang loop`. We can fix this with predictions. 
@@ -46,7 +46,7 @@ loop [
     Doug -set 1
     prediction (Doug) = 0 [
         Believers win [
-            gouD
+            guoD
         ]
     ]
 ]

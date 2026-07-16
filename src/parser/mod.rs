@@ -276,8 +276,8 @@ impl<'a> Parser<'a> {
                     });
                 }
 
-                TokenKind::Goud => {
-                    nodes.push(Stmt::Goud);
+                TokenKind::Guod => {
+                    nodes.push(Stmt::Guod);
                 }
 
                 TokenKind::RSquare => {
@@ -363,7 +363,7 @@ impl<'a> Parser<'a> {
                             return Err(ParseErr::new(
                                 self.i as usize,
                                 0,
-                                &format!("expected argument or ), got {}", token_name(other.unwrap_or(&TokenKind::Goud))),
+                                &format!("expected argument or ), got {}", token_name(other.unwrap_or(&TokenKind::Guod))),
                             ));
                         }
                     }
