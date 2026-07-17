@@ -5,7 +5,7 @@ permalink: /docs/control_flow/
 
 # Control Flow
 
-Douglang doesn't have much control flow. Our scientists are still figuring out what "structured programming" even means. That means no functions or fancy loops. I'm sure we'll get them eventually, it's only a matter of time.
+Douglang doesn't have much control flow. Our scientists are still figuring out what "structured programming" even means. That means loops, predictions, and something that is not a function because we called it a five minute coding adventure instead.
 
 But let's focus on the present, because the present is a gift, that's why it's called the present.
 
@@ -52,3 +52,27 @@ loop [
 ]
 tts "LAUNDRY!!!!!!!" 
 ```
+
+## Five minute coding adventures
+
+If you find yourself copying the same horrid idea, define it once with `#!douglang five_minute_coding_adventure`. The adventure is stored on the current tape index, just like `#!douglang set` stores a value.
+
+The word after `#!douglang five_minute_coding_adventure` is the adventure's name. It cannot be an existing Douglang keyword.
+
+```douglang
+set 0
+Doug set "Hello"
+Doug set 0
+five_minute_coding_adventure add [
+    DougDougDoug Doug
+    set (DougDougDoug)
+    +set (DougDougDoug Doug DougDoug)
+    guoD
+]
+
+add Doug set 1 Doug set 1 call DougDougDoug Doug tts end
+```
+
+In that example, the `add` adventure is stored at its tape location. The two statements after `add` write inputs relative to that location, `call` runs the adventure, and the statements after `call` read the output relative to the same location.
+
+Use `#!douglang end` to finish an adventure call.

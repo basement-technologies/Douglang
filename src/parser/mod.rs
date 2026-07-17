@@ -55,14 +55,30 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<Vec<Stmt>, ParseErr> {
-        self.process(true)
+        self.process(true, false)
     }
 
-    fn process(&mut self, is_top: bool) -> Result<Vec<Stmt>, ParseErr> {
+    fn process(&mut self, is_top: bool, stop_at_end: bool) -> Result<Vec<Stmt>, ParseErr> {
         let mut nodes: Vec<Stmt> = Vec::new();
 
-        while let Some(token) = self.next() {
+        loop {
+            if stop_at_end {
+                match self.check_next().map(|t| &t.kind) {
+                    Some(TokenKind::Call) | Some(TokenKind::End) => {
+                        self.next();
+                        return Ok(nodes);
+                    }
+                    Some(TokenKind::RSquare) | None => return Ok(nodes),
+                    _ => {}
+                }
+            }
+
+            let Some(token) = self.next() else {
+                break;
+            };
             match &token.kind {
+                TokenKind::Call => {}
+
                 TokenKind::Tts | TokenKind::Ttss => {
                     let overlap = matches!(token.kind, TokenKind::Ttss);
                     match self.check_next().map(|t| &t.kind) {
@@ -78,6 +94,15 @@ impl<'a> Parser<'a> {
                         Some(TokenKind::LParen) => {
                             self.next();
                             let expr = self.parse_par_expr()?;
+                            nodes.push(Stmt::Tts {
+                                msg: Some(expr),
+                                use_index: false,
+                                overlap,
+                            });
+                        }
+                        Some(TokenKind::LSquare) => {
+                            self.next();
+                            let expr = self.parse_main_tape_expr()?;
                             nodes.push(Stmt::Tts {
                                 msg: Some(expr),
                                 use_index: false,
@@ -112,6 +137,10 @@ impl<'a> Parser<'a> {
                             let expr = self.parse_par_expr()?;
                             nodes.push(Stmt::Set { value: expr, oper });
                         }
+                        Some(TokenKind::LSquare) => {
+                            let expr = self.parse_main_tape_expr()?;
+                            nodes.push(Stmt::Set { value: expr, oper });
+                        }
                         Some(other) => {
                             let tok = &self.tokens[self.i as usize];
                             return Err(ParseErr::new(
@@ -139,6 +168,36 @@ impl<'a> Parser<'a> {
                     nodes.push(node);
                 }
 
+                TokenKind::LSquare => {
+                    let chains = match self.next() {
+                        Some(t) => match &t.kind {
+                            TokenKind::Doug { count } => self.parse_doug_seq_chains(*count),
+                            other => {
+                                return Err(ParseErr::new(
+                                    t.line,
+                                    t.column,
+                                    &format!("expected Doug chain, got {}", token_name(other)),
+                                ));
+                            }
+                        },
+                        None => return Err(self.eof_err("expected Doug chain, got end of input")),
+                    };
+
+                    match self.next() {
+                        Some(t) if matches!(t.kind, TokenKind::RSquare) => {}
+                        Some(t) => {
+                            return Err(ParseErr::new(
+                                t.line,
+                                t.column,
+                                &format!("expected ], got {}", token_name(&t.kind)),
+                            ));
+                        }
+                        None => return Err(self.eof_err("expected ], got end of input")),
+                    }
+
+                    nodes.push(Stmt::MainTapeDoug { chains });
+                }
+
                 TokenKind::Loop => {
                     let token2 = self.next();
                     match token2 {
@@ -152,7 +211,7 @@ impl<'a> Parser<'a> {
                         }
                         None => return Err(self.eof_err("expected [, got end of input")),
                     }
-                    let body = self.process(false)?;
+                    let body = self.process(false, false)?;
                     nodes.push(Stmt::Loop { body });
                 }
 
@@ -212,7 +271,7 @@ impl<'a> Parser<'a> {
                         None => return Err(self.eof_err("expected [, got end of input")),
                     }
 
-                    let body1 = self.process(false)?;
+                    let body1 = self.process(false, false)?;
 
                     let doubt1 = matches!(token_kind1, TokenKind::Doubters);
                     let mut doubt_body: Vec<Stmt> = if doubt1 { body1.clone() } else { Vec::new() };
@@ -260,7 +319,7 @@ impl<'a> Parser<'a> {
                             None => return Err(self.eof_err("expected [, got end of input")),
                         }
 
-                        let body2 = self.process(false)?;
+                        let body2 = self.process(false, false)?;
 
                         if matches!(token_kind2, TokenKind::Believers) {
                             believe_body = body2;
@@ -290,6 +349,56 @@ impl<'a> Parser<'a> {
 
                 TokenKind::Guod => {
                     nodes.push(Stmt::Guod);
+                }
+
+                TokenKind::FiveMinuteCodingAdventure => {
+                    let name = match self.next() {
+                        Some(t) => match &t.kind {
+                            TokenKind::FmcaCall(name) => name.clone(),
+                            other => {
+                                return Err(ParseErr::new(
+                                    t.line,
+                                    t.column,
+                                    &format!(
+                                        "procedure name cannot be existing keyword {}",
+                                        token_name(other)
+                                    ),
+                                ));
+                            }
+                        },
+                        None => return Err(self.eof_err("expected procedure name, got end of input")),
+                    };
+
+                    match self.next() {
+                        Some(t) if matches!(t.kind, TokenKind::LSquare) => {}
+                        Some(t) => {
+                            return Err(ParseErr::new(
+                                t.line,
+                                t.column,
+                                &format!("expected [, got {}", token_name(&t.kind)),
+                            ));
+                        }
+                        None => return Err(self.eof_err("expected [, got end of input")),
+                    }
+
+                    let body = self.process(false, false)?;
+                    nodes.push(Stmt::FiveMinuteCodingAdventure { name, body });
+                }
+
+                TokenKind::FmcaCall(name) => {
+                    let args = self.process(false, true)?;
+                    let after_call = if self.i >= 0
+                        && matches!(self.tokens[self.i as usize].kind, TokenKind::Call)
+                    {
+                        self.process(false, true)?
+                    } else {
+                        Vec::new()
+                    };
+                    nodes.push(Stmt::FmcaCall {
+                        name: name.clone(),
+                        args,
+                        after_call,
+                    });
                 }
 
                 TokenKind::RSquare => {
@@ -336,7 +445,7 @@ impl<'a> Parser<'a> {
         Stmt::Doug { chains, reset }
     }
 
-    fn parse_doug_seq(&mut self, first_count: usize) -> Expr {
+    fn parse_doug_seq_chains(&mut self, first_count: usize) -> Vec<DougChain> {
         let mut chains = vec![DougChain { count: first_count }];
         while matches!(
             self.check_next().map(|t| &t.kind),
@@ -346,7 +455,87 @@ impl<'a> Parser<'a> {
                 chains.push(DougChain { count: *count });
             }
         }
-        Expr::DougSequence { chains }
+        chains
+    }
+
+    fn parse_doug_seq(&mut self, first_count: usize) -> Expr {
+        Expr::DougSequence {
+            chains: self.parse_doug_seq_chains(first_count),
+        }
+    }
+
+    fn parse_main_tape_chains(&mut self) -> Result<Vec<DougChain>, ParseErr> {
+        let parenthesized = match self.next() {
+            Some(t) => match &t.kind {
+                TokenKind::LParen => true,
+                TokenKind::Doug { count } => {
+                    let chains = self.parse_doug_seq_chains(*count);
+                    match self.next() {
+                        Some(t) if matches!(t.kind, TokenKind::RSquare) => return Ok(chains),
+                        Some(t) => {
+                            return Err(ParseErr::new(
+                                t.line,
+                                t.column,
+                                &format!("expected ], got {}", token_name(&t.kind)),
+                            ));
+                        }
+                        None => return Err(self.eof_err("expected ], got end of input")),
+                    }
+                }
+                other => {
+                    return Err(ParseErr::new(
+                        t.line,
+                        t.column,
+                        &format!("expected Doug chain, got {}", token_name(other)),
+                    ));
+                }
+            },
+            None => return Err(self.eof_err("expected Doug chain, got end of input")),
+        };
+
+        let chains = match self.next() {
+            Some(t) => match &t.kind {
+                TokenKind::Doug { count } => self.parse_doug_seq_chains(*count),
+                other => {
+                    return Err(ParseErr::new(
+                        t.line,
+                        t.column,
+                        &format!("expected Doug chain, got {}", token_name(other)),
+                    ));
+                }
+            },
+            None => return Err(self.eof_err("expected Doug chain, got end of input")),
+        };
+
+        if parenthesized {
+            match self.next() {
+                Some(t) if matches!(t.kind, TokenKind::RParen) => {}
+                Some(t) => {
+                    return Err(ParseErr::new(
+                        t.line,
+                        t.column,
+                        &format!("expected ), got {}", token_name(&t.kind)),
+                    ));
+                }
+                None => return Err(self.eof_err("expected ), got end of input")),
+            }
+        }
+
+        match self.next() {
+            Some(t) if matches!(t.kind, TokenKind::RSquare) => Ok(chains),
+            Some(t) => Err(ParseErr::new(
+                t.line,
+                t.column,
+                &format!("expected ], got {}", token_name(&t.kind)),
+            )),
+            None => Err(self.eof_err("expected ], got end of input")),
+        }
+    }
+
+    fn parse_main_tape_expr(&mut self) -> Result<Expr, ParseErr> {
+        Ok(Expr::MainTapeDougSequence {
+            chains: self.parse_main_tape_chains()?,
+        })
     }
 
     fn parse_rigged(&mut self, line: usize, column: usize) -> Result<Expr, ParseErr> {
@@ -444,6 +633,8 @@ impl<'a> Parser<'a> {
             Some(t) => match &t.kind {
                 TokenKind::Rigged => self.parse_rigged(t.line, t.column),
                 TokenKind::Doug { count } => Ok(self.parse_doug_seq(*count)),
+                TokenKind::LSquare => self.parse_main_tape_expr(),
+                TokenKind::FmcaCall(name) => Ok(Expr::FmcaCall { name: name.clone() }),
                 TokenKind::Literal(value) => Ok(Expr::Literal(value.clone())),
                 other => Err(ParseErr::new(
                     t.line,

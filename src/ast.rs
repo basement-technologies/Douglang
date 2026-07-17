@@ -29,7 +29,9 @@ pub struct DougChain {
 pub enum Expr {
     Literal(ValueLiteral),
     DougSequence { chains: Vec<DougChain> },
+    MainTapeDougSequence { chains: Vec<DougChain> },
     Rigged { func: String, args: Vec<Expr> },
+    FmcaCall { name: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,5 +65,17 @@ pub enum Stmt {
         believe_body: Vec<Stmt>,
         doubt_body: Vec<Stmt>,
         condition: Condition,
+    },
+    FiveMinuteCodingAdventure {
+        name: String,
+        body: Vec<Stmt>,
+    },
+    FmcaCall {
+        name: String,
+        args: Vec<Stmt>,
+        after_call: Vec<Stmt>,
+    },
+    MainTapeDoug {
+        chains: Vec<DougChain>,
     },
 }

@@ -1,4 +1,4 @@
-use crate::ast::DougChain;
+use crate::ast::{DougChain, Stmt};
 
 pub const RUNTIME_ERROR_DIVISION_BY_ZERO: &str = "division by zero";
 pub const RUNTIME_ERROR_MODULO_BY_ZERO: &str = "modulo by zero";
@@ -10,10 +10,6 @@ pub const TTS_STATE_SPEAKING_KEY: &str = "SPEAKING";
 pub const TTS_STATE_DONE_MARKER: &str = "__DOUGLANG_DONE__";
 pub const TTS_SPEAKING_AMP: f64 = 0.5;
 pub const TTS_IDLE_AMP: f64 = 0.0;
-
-pub fn invalid_tape_write_message(index: i64, next_valid: i64) -> String {
-    format!("invalid tape write at index {index}; next writable index is {next_valid}")
-}
 
 pub fn doug_index_overflow_message(count: usize) -> String {
     format!("Doug chain of length {count} is too large to index safely")
@@ -103,6 +99,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Str(String),
+    FiveMinuteCodingAdventure { body: Vec<Stmt> },
 }
 
 impl Value {
@@ -111,6 +108,7 @@ impl Value {
             Value::Int(v) => *v as f64,
             Value::Float(v) => *v,
             Value::Str(s) => s.parse::<f64>().unwrap_or(0.0),
+            Value::FiveMinuteCodingAdventure { .. } => 0.0,
         }
     }
 
@@ -131,13 +129,13 @@ impl std::fmt::Display for Value {
                 }
             }
             Value::Str(v) => write!(f, "{v}"),
+            Value::FiveMinuteCodingAdventure { .. } => write!(f, "<five_minute_coding_adventure>"),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeErrorKind {
-    InvalidTapeWrite { index: i64, next_valid: i64 },
     DougIndexOverflow { count: usize },
     DivisionByZero,
     ModuloByZero,
@@ -157,13 +155,6 @@ impl RuntimeError {
         RuntimeError {
             kind: RuntimeErrorKind::Ffi(msg.to_string()),
             message: msg.to_string(),
-        }
-    }
-
-    pub fn invalid_tape_write(index: i64, next_valid: i64) -> Self {
-        RuntimeError {
-            kind: RuntimeErrorKind::InvalidTapeWrite { index, next_valid },
-            message: invalid_tape_write_message(index, next_valid),
         }
     }
 
@@ -339,6 +330,7 @@ pub fn modulo(left: &Value, rhs: &Value) -> Result<Value, RuntimeError> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct RuntimeTape {
     left: Vec<Value>,
     right: Vec<Value>,
@@ -368,27 +360,27 @@ impl RuntimeTape {
         self.get(self.index)
     }
 
+    pub fn index(&self) -> i64 {
+        self.index
+    }
+
+    pub fn set_index(&mut self, index: i64) {
+        self.index = index;
+    }
+
     pub fn set(&mut self, i: i64, value: Value) -> Result<(), RuntimeError> {
         if i < 0 {
             let idx = (-i - 1) as usize;
-            let len = self.left.len();
-            if idx > len {
-                return Err(RuntimeError::invalid_tape_write(i, -(len as i64) - 1));
-            } else if idx == len {
-                self.left.push(value);
-            } else {
-                self.left[idx] = value;
+            while self.left.len() <= idx {
+                self.left.push(Value::Int(0));
             }
+            self.left[idx] = value;
         } else {
             let idx = i as usize;
-            let len = self.right.len();
-            if idx > len {
-                return Err(RuntimeError::invalid_tape_write(i, len as i64));
-            } else if idx == len {
-                self.right.push(value);
-            } else {
-                self.right[idx] = value;
+            while self.right.len() <= idx {
+                self.right.push(Value::Int(0));
             }
+            self.right[idx] = value;
         }
         Ok(())
     }
@@ -431,14 +423,11 @@ mod tests {
     }
 
     #[test]
-    fn tape_allows_only_contiguous_writes() {
+    fn tape_allows_sparse_writes() {
         let mut tape = RuntimeTape::new();
-        assert!(tape.set(1, Value::Int(7)).is_ok());
-        let err = tape.set(3, Value::Int(9)).unwrap_err();
-        assert_eq!(
-            err.message,
-            "invalid tape write at index 3; next writable index is 2"
-        );
+        assert!(tape.set(4, Value::Int(9)).is_ok());
+        assert!(matches!(tape.get(1), Value::Int(0)));
+        assert!(matches!(tape.get(4), Value::Int(9)));
     }
 
     #[test]

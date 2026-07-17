@@ -38,6 +38,9 @@ fn resolve_keyword(keyword: &str) -> Option<TokenKind> {
         "Believers" => TokenKind::Believers,
         "Doubters" => TokenKind::Doubters,
         "win" => TokenKind::Win,
+        "five_minute_coding_adventure" => TokenKind::FiveMinuteCodingAdventure,
+        "call" => TokenKind::Call,
+        "end" => TokenKind::End,
         "(" => TokenKind::LParen,
         ")" => TokenKind::RParen,
         "[" => TokenKind::LSquare,
@@ -53,7 +56,10 @@ fn resolve_keyword(keyword: &str) -> Option<TokenKind> {
 }
 
 const KEYWORDS: &[&str] = &[
+    "five_minute_coding_adventure",
     "prediction",
+    "call",
+    "end",
     "Believers",
     "Doubters",
     "Rigged",
@@ -246,6 +252,20 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexErr> {
                 )
             };
             tokens.push(Token::new(TokenKind::Literal(value), line, start_col));
+            continue;
+        }
+
+        if c.is_ascii_alphabetic() || c == '_' {
+            let start_i = i;
+            let start_col = column;
+            i += 1;
+            column += 1;
+            while i < length && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+                column += 1;
+            }
+            let text: String = chars[start_i..i].iter().collect();
+            tokens.push(Token::new(TokenKind::FmcaCall(text), line, start_col));
             continue;
         }
 

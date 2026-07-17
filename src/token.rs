@@ -37,6 +37,10 @@ pub enum TokenKind {
     Believers,
     Doubters,
     Win,
+    FiveMinuteCodingAdventure,
+    FmcaCall(String),
+    Call,
+    End,
 
     Literal(ValueLiteral),
 
