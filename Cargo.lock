@@ -386,6 +386,7 @@ name = "douglang"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "flate2",
  "image",
  "libffi",
  "minifb",

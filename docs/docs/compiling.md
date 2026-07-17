@@ -70,7 +70,3 @@ douglang program.doug --cc program --link sdl2
 ```
 
 This runs `pkg-config --cflags sdl2` and `pkg-config --libs sdl2` under the hood.
-
-## What TTS becomes
-
-As a result of your choice to compile Douglang to an inferior language, you don't get to hear tts. This is entirely your fault. You had a choice.

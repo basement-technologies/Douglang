@@ -29,10 +29,7 @@ pub struct DougChain {
 pub enum Expr {
     Literal(ValueLiteral),
     DougSequence { chains: Vec<DougChain> },
-    Rigged {
-        func: String,
-        args: Vec<Expr>,
-    },
+    Rigged { func: String, args: Vec<Expr> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +54,7 @@ pub enum Stmt {
         value: Expr,
         oper: SetOper,
     },
+    Expr(Expr),
     Loop {
         body: Vec<Stmt>,
     },

@@ -1,4 +1,4 @@
-use crate::token::{ValueLiteral, Token, TokenKind};
+use crate::token::{Token, TokenKind, ValueLiteral};
 
 #[derive(Debug, Clone)]
 pub struct LexErr {
@@ -8,9 +8,7 @@ pub struct LexErr {
 impl LexErr {
     fn new(line: usize, column: usize, msg: &str) -> Self {
         LexErr {
-            message: format!(
-                "You are literally trolling. {msg} on line {line}, column {column}"
-            ),
+            message: format!("You are literally trolling. {msg} on line {line}, column {column}"),
         }
     }
 }
@@ -160,7 +158,8 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexErr> {
         let mut matched = false;
         for &keyword in KEYWORDS {
             if starts_with(&chars, i, keyword) {
-                let kind = resolve_keyword(keyword).expect("KEYWORDS entry missing from resolve_keyword");
+                let kind =
+                    resolve_keyword(keyword).expect("KEYWORDS entry missing from resolve_keyword");
                 tokens.push(Token::new(kind, line, column));
                 let klen = keyword.chars().count();
                 i += klen;
@@ -204,7 +203,11 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexErr> {
                 }
             }
             if !terminated {
-                return Err(LexErr::new(start_line, start_col, "unclosed string literal"));
+                return Err(LexErr::new(
+                    start_line,
+                    start_col,
+                    "unclosed string literal",
+                ));
             }
             tokens.push(Token::new(
                 TokenKind::Literal(ValueLiteral::Str(str_content)),

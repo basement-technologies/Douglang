@@ -4,6 +4,7 @@ mod dougterface;
 mod interpreter;
 mod lexer;
 mod parser;
+mod runtime;
 mod token;
 mod tts;
 
@@ -16,8 +17,109 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.get(1).is_some_and(|arg| arg == "--run-source-helper") {
+        let Some(path) = args.get(2) else {
+            eprintln!("--run-source-helper requires a source file path");
+            process::exit(1);
+        };
+        let source = match fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(e) => {
+                eprintln!("couldn't read compiled source: {e}");
+                process::exit(1);
+            }
+        };
+
+        let mut linked_libs = Vec::new();
+        let mut i = 3;
+        while i < args.len() {
+            if args[i] == "--link" {
+                i += 1;
+                if i < args.len() {
+                    linked_libs.push(args[i].clone());
+                }
+            }
+            i += 1;
+        }
+
+        let tokens = match lexer::lex(&source) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                eprintln!("{e}");
+                process::exit(1);
+            }
+        };
+        let ast = match parser::parse(&tokens) {
+            Ok(ast) => ast,
+            Err(e) => {
+                eprintln!("{e}");
+                process::exit(1);
+            }
+        };
+
+        let tts = Arc::new(tts::Tts::new());
+        let mut gui = dougterface::Dougterface::new(&tts);
+        gui.start(&tts);
+        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs);
+        if let Err(e) = interp.run(&ast) {
+            eprintln!("{e}");
+            process::exit(1);
+        }
+        tts.wait();
+        gui.stop();
+        return;
+    }
+
+    if args
+        .get(1)
+        .is_some_and(|arg| arg == "--tts-helper" || arg == "--tts-helper-quiet")
+    {
+        let quiet = args.get(1).is_some_and(|arg| arg == "--tts-helper-quiet");
+        let Some(mode) = args.get(2) else {
+            eprintln!("--tts-helper requires a mode");
+            process::exit(1);
+        };
+        let Some(path) = args.get(3) else {
+            eprintln!("--tts-helper requires a text file path");
+            process::exit(1);
+        };
+        let state_path = args.get(4).cloned();
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) => {
+                eprintln!("couldn't read tts helper text: {e}");
+                process::exit(1);
+            }
+        };
+        let _ = fs::remove_file(path);
+        let tts = tts::Tts::new();
+        if let Some(state_path) = state_path {
+            tts.set_state_file(state_path);
+        }
+        if quiet {
+            tts.speak_audio_only(&text, mode == "overlap");
+        } else if mode == "overlap" {
+            tts.speak_overlap(&text);
+            tts.wait();
+        } else {
+            tts.speak(&text);
+        }
+        return;
+    }
+
+    if args.get(1).is_some_and(|arg| arg == "--dougterface-helper") {
+        let Some(path) = args.get(2) else {
+            eprintln!("--dougterface-helper requires a state file path");
+            process::exit(1);
+        };
+        dougterface::run_file_helper(Path::new(path).to_path_buf());
+        return;
+    }
+
     if args.len() < 2 {
-        eprintln!("usage: douglang <input.doug> [--compile [output.c]] [--cc] [--link <lib>...]");
+        eprintln!(
+            "usage: douglang <input.doug> [--compile [output.c]] [--cc [binary]] [--link <lib>...] [--no-gui]"
+        );
         process::exit(1);
     }
 
@@ -85,8 +187,17 @@ fn main() {
             .cloned()
             .unwrap_or(format!("{input_name}.c"));
 
-        let mut comp = compiler::Compiler::new();
-        let c_code = comp.compile(&ast, &linked_libs);
+        let helper_path = env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.to_string()));
+        let mut comp = compiler::Compiler::new(helper_path, source.clone(), linked_libs.clone());
+        let c_code = match comp.compile(&ast, &linked_libs) {
+            Ok(c_code) => c_code,
+            Err(e) => {
+                eprintln!("{e}");
+                process::exit(1);
+            }
+        };
         let elapsed = start.elapsed();
 
         if let Err(e) = fs::write(&c_path, &c_code) {
@@ -114,16 +225,19 @@ fn main() {
                     }
                 });
 
-            let mut gcc_args: Vec<String> = vec![
-                "-o".into(),
-                binary_name.clone(),
-                c_path.to_string(),
-            ];
+            let mut gcc_args: Vec<String> =
+                vec!["-o".into(), binary_name.clone(), c_path.to_string()];
 
             for lib in &linked_libs {
-                if lib.ends_with(".c") { continue; }
-                let is_path = lib.contains('/') || lib.contains('\\')
-                    || lib.ends_with(".dll") || lib.ends_with(".so") || lib.ends_with(".a") || lib.ends_with(".dylib");
+                if lib.ends_with(".c") {
+                    continue;
+                }
+                let is_path = lib.contains('/')
+                    || lib.contains('\\')
+                    || lib.ends_with(".dll")
+                    || lib.ends_with(".so")
+                    || lib.ends_with(".a")
+                    || lib.ends_with(".dylib");
                 if is_path {
                     gcc_args.push(lib.clone());
                 } else {
@@ -133,9 +247,7 @@ fn main() {
 
             gcc_args.extend(resolve_pkg_config(&linked_libs));
 
-            let status = process::Command::new("gcc")
-                .args(&gcc_args)
-                .status();
+            let status = process::Command::new("gcc").args(&gcc_args).status();
 
             match status {
                 Ok(s) if s.success() => {
@@ -155,14 +267,17 @@ fn main() {
         let elapsed = start.elapsed();
         eprintln!("parsed in {:.6} seconds", elapsed.as_secs_f64());
 
+        let no_gui = args.iter().any(|a| a == "--no-gui");
         let tts = Arc::new(tts::Tts::new());
 
         let mut gui = dougterface::Dougterface::new(&tts);
-        gui.start(&tts);
+        if !no_gui {
+            gui.start(&tts);
+        }
 
         let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs);
         if let Err(e) = interp.run(&ast) {
-            eprintln!("{}", e.message);
+            eprintln!("{e}");
             process::exit(1);
         }
 
@@ -177,13 +292,11 @@ fn resolve_pkg_config(libs: &[String]) -> Vec<String> {
         if let Ok(output) = process::Command::new("pkg-config")
             .args(["--libs", lib])
             .output()
+            && output.status.success()
+            && let Ok(out) = String::from_utf8(output.stdout)
         {
-            if output.status.success() {
-                if let Ok(out) = String::from_utf8(output.stdout) {
-                    for flag in out.split_whitespace() {
-                        flags.push(flag.to_string());
-                    }
-                }
+            for flag in out.split_whitespace() {
+                flags.push(flag.to_string());
             }
         }
     }

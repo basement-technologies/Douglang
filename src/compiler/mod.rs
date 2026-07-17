@@ -1,47 +1,45 @@
-mod runtime;
+use crate::ast::Stmt;
 
-use std::collections::HashMap;
+const LAUNCHER_TEMPLATE: &str = include_str!("launcher.c");
 
-use crate::ast::{BoolOper, Condition, DougChain, Expr, SetOper, Stmt};
-use crate::token::ValueLiteral;
-use runtime::RUNTIME;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompileError {
+    pub message: String,
+}
 
-fn bool_oper_to_c(oper: &BoolOper) -> &'static str {
-    match oper {
-        BoolOper::Equal => "==",
-        BoolOper::NotEqual => "!=",
-        BoolOper::Greater => ">",
-        BoolOper::Less => "<",
-        BoolOper::GreaterEqual => ">=",
-        BoolOper::LessEqual => "<=",
+impl CompileError {
+    fn new(msg: impl Into<String>) -> Self {
+        CompileError {
+            message: msg.into(),
+        }
     }
 }
 
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for CompileError {}
+
 pub struct Compiler {
-    lines: Vec<String>,
-    indent: usize,
-    tmp: usize,
-    funcs: HashMap<String, usize>,
+    helper_path: Option<String>,
+    source: String,
+    linked_libs: Vec<String>,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(
+        helper_path: Option<String>,
+        source: impl Into<String>,
+        linked_libs: Vec<String>,
+    ) -> Self {
         Compiler {
-            lines: Vec::new(),
-            indent: 1,
-            tmp: 0,
-            funcs: HashMap::new(),
+            helper_path,
+            source: source.into(),
+            linked_libs,
         }
-    }
-
-    fn emit(&mut self, line: &str) {
-        let prefix = "    ".repeat(self.indent);
-        self.lines.push(format!("{prefix}{line}"));
-    }
-
-    fn new_tmp_var(&mut self) -> String {
-        self.tmp += 1;
-        format!("_t{}", self.tmp)
     }
 
     fn cstring_literal(s: &str) -> String {
@@ -53,6 +51,7 @@ impl Compiler {
                 '\n' => out.push_str("\\n"),
                 '\t' => out.push_str("\\t"),
                 '\r' => out.push_str("\\r"),
+                '\0' => out.push_str("\\0"),
                 other => out.push(other),
             }
         }
@@ -60,195 +59,60 @@ impl Compiler {
         out
     }
 
-    fn doug_index(chains: &[DougChain], start: &str) -> String {
-        let mut expr = start.to_string();
-        for (i, chain) in chains.iter().enumerate() {
-            let value: i64 = 1 << (chain.count - 1);
-            let oper = if i % 2 == 0 { '+' } else { '-' };
-            expr = format!("({expr} {oper} {value})");
-        }
-        expr
+    pub fn compile(
+        &mut self,
+        _nodes: &[Stmt],
+        _linked_libs: &[String],
+    ) -> Result<String, CompileError> {
+        let Some(helper_path) = &self.helper_path else {
+            return Err(CompileError::new(
+                "compiled launcher generation needs the douglang executable path",
+            ));
+        };
+
+        let linked_libs = self
+            .linked_libs
+            .iter()
+            .map(|lib| Self::cstring_literal(lib))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        Ok(LAUNCHER_TEMPLATE
+            .replace(
+                "__DOUGLANG_HELPER_PATH__",
+                &Self::cstring_literal(helper_path),
+            )
+            .replace("__DOUGLANG_SOURCE__", &Self::cstring_literal(&self.source))
+            .replace("__DOUGLANG_LINKS__", &linked_libs)
+            .replace(
+                "__DOUGLANG_LINK_COUNT__",
+                &self.linked_libs.len().to_string(),
+            ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lexer, parser};
+
+    fn compile_src(source: &str) -> String {
+        let ast = parser::parse(&lexer::lex(source).unwrap()).unwrap();
+        let mut compiler = Compiler::new(
+            Some("C:\\fake path\\douglang.exe".to_string()),
+            source.to_string(),
+            Vec::new(),
+        );
+        compiler.compile(&ast, &[]).unwrap()
     }
 
-    fn ffi_arg(&mut self, expr: &Expr) -> String {
-        match expr {
-            Expr::Literal(lit) => match lit {
-                ValueLiteral::Str(s) => format!("(double)(size_t){}", Self::cstring_literal(s)),
-                ValueLiteral::Float(v) => format!("({v:?})"),
-                ValueLiteral::Int(v) => format!("(double)({v}LL)"),
-            },
-            _ => {
-                let val = self.eval_expr(expr);
-                let t = self.new_tmp_var();
-                self.emit(&format!("DougValue {t} = {val};"));
-                format!(
-                    "(({t}).kind == DV_STRING ? (double)(size_t)dv_as_cstr({t}) : dv_as_double({t}))"
-                )
-            }
-        }
-    }
-
-    fn eval_expr(&mut self, expr: &Expr) -> String {
-        match expr {
-            Expr::Literal(lit) => match lit {
-                ValueLiteral::Str(s) => {
-                    format!("dv_make_string({})", Self::cstring_literal(s))
-                }
-                ValueLiteral::Float(v) => format!("dv_make_double({v:?})"),
-                ValueLiteral::Int(v) => format!("dv_make_int({v}LL)"),
-            },
-            Expr::DougSequence { chains } => {
-                let idx = Self::doug_index(chains, "0LL");
-                format!("dv_get({idx})")
-            }
-            Expr::Rigged { func: func_name, args } => {
-                self.funcs.insert(func_name.clone(), args.len());
-                let call_args: Vec<String> =
-                    args.iter().map(|a| self.ffi_arg(a)).collect();
-                let joined = call_args.join(", ");
-                format!("dv_make_int((long long){func_name}({joined}))")
-            }
-        }
-    }
-
-    fn eval_cond(&mut self, cond: &Condition) -> String {
-        let left = self.eval_expr(&cond.left);
-        let right = self.eval_expr(&cond.right);
-        let oper = bool_oper_to_c(&cond.oper);
-        let lt = self.new_tmp_var();
-        let rt = self.new_tmp_var();
-        self.emit(&format!("DougValue {lt} = {left};"));
-        self.emit(&format!("DougValue {rt} = {right};"));
-        format!(
-            "((({lt}).kind == DV_STRING || ({rt}).kind == DV_STRING) \
-             ? (strcmp(dv_to_string({lt}), dv_to_string({rt})) {oper} 0) \
-             : (dv_as_double({lt}) {oper} dv_as_double({rt})))"
-        )
-    }
-
-    fn comp_block(&mut self, nodes: &[Stmt]) {
-        for node in nodes {
-            match node {
-                Stmt::Set { value, oper } => {
-                    let val = self.eval_expr(value);
-                    match oper {
-                        SetOper::Set => self.emit(&format!("dv_set(dv_index, {val});")),
-                        SetOper::Add => {
-                            self.emit(&format!(
-                                "dv_set(dv_index, dv_add(dv_get(dv_index), {val}));"
-                            ));
-                        }
-                        SetOper::Sub => {
-                            self.emit(&format!(
-                                "dv_set(dv_index, dv_arith(dv_get(dv_index), {val}, '-'));"
-                            ));
-                        }
-                        SetOper::Mul => {
-                            self.emit(&format!(
-                                "dv_set(dv_index, dv_arith(dv_get(dv_index), {val}, '*'));"
-                            ));
-                        }
-                        SetOper::Div => {
-                            self.emit(&format!(
-                                "dv_set(dv_index, dv_arith(dv_get(dv_index), {val}, '/'));"
-                            ));
-                        }
-                        SetOper::Mod => {
-                            self.emit(&format!(
-                                "dv_set(dv_index, dv_arith(dv_get(dv_index), {val}, '%'));"
-                            ));
-                        }
-                    }
-                }
-
-                Stmt::Tts {
-                    msg,
-                    use_index,
-                    overlap: _,
-                } => {
-                    if *use_index {
-                        self.emit("dv_tts(dv_get(dv_index));");
-                    } else if let Some(expr) = msg {
-                        let val = self.eval_expr(expr);
-                        self.emit(&format!("dv_tts({val});"));
-                    }
-                }
-
-                Stmt::Doug { chains, reset } => {
-                    let start = if *reset { "0LL" } else { "dv_index" };
-                    let idx = Self::doug_index(chains, start);
-                    self.emit(&format!("dv_index = {idx};"));
-                }
-
-                Stmt::Loop { body } => {
-                    self.emit("while (1) {");
-                    self.indent += 1;
-                    self.comp_block(body);
-                    self.indent -= 1;
-                    self.emit("}");
-                }
-
-                Stmt::Guod => {
-                    self.emit("break;");
-                }
-
-                Stmt::Prediction {
-                    believe_body,
-                    doubt_body,
-                    condition,
-                } => {
-                    let cond = self.eval_cond(condition);
-                    self.emit(&format!("if ({cond}) {{"));
-                    self.indent += 1;
-                    self.comp_block(believe_body);
-                    self.indent -= 1;
-                    self.emit("} else {");
-                    self.indent += 1;
-                    self.comp_block(doubt_body);
-                    self.indent -= 1;
-                    self.emit("}");
-                }
-            }
-        }
-    }
-
-    pub fn compile(&mut self, nodes: &[Stmt], linked_libs: &[String]) -> String {
-        self.comp_block(nodes);
-
-        let body = self.lines.join("\n");
-
-        let mut embedded = String::new();
-        for lib in linked_libs {
-            if lib.ends_with(".c") {
-                if let Ok(content) = std::fs::read_to_string(lib) {
-                    embedded.push_str(&content.replace("__declspec(dllexport) ", ""));
-                    embedded.push('\n');
-                }
-            }
-        }
-
-        let mut includes = String::new();
-        for lib in linked_libs {
-            if let Ok(output) = std::process::Command::new("pkg-config")
-                .args(["--cflags", lib])
-                .output()
-            {
-                if output.status.success() {
-                    if let Ok(out) = String::from_utf8(output.stdout) {
-                        includes.push_str(&out);
-                    }
-                }
-            }
-        }
-
-        let mut decls = String::new();
-        for (name, argc) in &self.funcs {
-            let params = (0..*argc).map(|_| "double").collect::<Vec<_>>().join(", ");
-            decls.push_str(&format!("extern double {name}({params});\n"));
-        }
-
-        format!(
-            "{RUNTIME}\n{embedded}{includes}{decls}\nint main(void) {{\n    dv_ensure(&dv_right, &dv_right_len, 0);\n{body}\n    return 0;\n}}\n"
-        )
+    #[test]
+    fn generated_artifact_is_rust_runtime_launcher() {
+        let c = compile_src("Bald set 1 tts");
+        assert!(c.contains("--run-source-helper"));
+        assert!(c.contains("DOUGLANG_SOURCE"));
+        assert!(c.contains("DOUGLANG_HELPER_PATH"));
+        assert!(!c.contains("static DougValue dv_add"));
+        assert!(!c.contains("static long long dv_doug_index"));
     }
 }

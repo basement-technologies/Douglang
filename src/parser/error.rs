@@ -6,9 +6,7 @@ pub struct ParseErr {
 impl ParseErr {
     pub fn new(line: usize, column: usize, msg: &str) -> Self {
         ParseErr {
-            message: format!(
-                "You are literally trolling. {msg} on line {line}, column {column}"
-            ),
+            message: format!("You are literally trolling. {msg} on line {line}, column {column}"),
         }
     }
 }
