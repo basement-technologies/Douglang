@@ -1,10 +1,10 @@
 five_minute_coding_adventure add [
-	DougDougDoug Doug
-	set (Doug)
-	+set (DougDoug)
-	guoD
+    DougDougDoug Doug set (Doug) +set (DougDoug)
+    guoD 
 ]
 
 DougDougDoug Doug DougDoug set "6 + 7 is: "
 
-add Doug set 6 Doug set 7 call DougDougDoug Doug DougDoug +set (DougDougDoug Doug) tts end
+add Doug set 6 Doug set 7 add call
+Bald DougDougDoug Doug DougDoug +set (add DougDougDoug Doug) 
+tts

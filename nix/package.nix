@@ -2,6 +2,9 @@
   lib,
   rustPlatform,
   pkg-config,
+  speechd,
+  makeWrapper,
+  glib
 }:
 let
   cargoTOML = lib.importTOML ../Cargo.toml;
@@ -21,7 +24,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
         (s + /src)
         (s + /Cargo.lock)
         (s + /Cargo.toml)
-        (s + /build.rs)
       ];
     };
 
@@ -31,7 +33,22 @@ rustPlatform.buildRustPackage (finalAttrs: {
   strictDeps = true;
   nativeBuildInputs = [
     pkg-config
+    makeWrapper
   ];
+  buildInputs = [
+    speechd
+    glib
+  ];
+
+  postFixup = ''
+    wrapProgram $out/bin/voxelmint \
+      --prefix LD_LIBRARY_PATH : ${
+        lib.makeLibraryPath [
+          speechd
+          glib
+        ]
+      }
+  '';
 
   meta = {
     description = "Interpreter for Douglang esolang";

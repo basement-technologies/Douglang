@@ -8,6 +8,8 @@
   pkg-config,
   gcc,
   libclang,
+  speechd,
+  glib,
 }:
 
 mkShell {
@@ -24,4 +26,14 @@ mkShell {
     pkg-config
     gcc
   ];
+
+  buildInputs = [
+    speechd
+    glib
+  ];
+
+  shellHook = ''
+    export LIBCLANG_PATH="${libclang.lib}/lib"
+    export BINDGEN_EXTRA_CLANG_ARGS="-I${speechd}/include"
+  '';
 }

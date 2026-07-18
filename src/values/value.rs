@@ -1,0 +1,214 @@
+use std::{
+    fmt::Display,
+    ops::{Add, Div, Mul, Sub},
+};
+
+use crate::{
+    interpreter::RuntimeError,
+    parser::ast::Stmt,
+    runtime::RuntimeError,
+    values::{
+        Operator,
+        tape::{AllocObject, LiteralList, MutatorView, TaggedScopedPtr, TypeList},
+    },
+};
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum Value {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Err(RuntimeError),
+    Fmca(Function),
+    Nil,
+}
+
+impl Value {
+    #[must_use]
+    pub fn apply_operator(l: Self, op: Operator, r: Self) -> Self {
+        match op {
+            Operator::Greater => Value::Boolean(l > r),
+            Operator::Less => Value::Boolean(l < r),
+            Operator::GreaterEquals => Value::Boolean(l >= r),
+            Operator::LessEquals => Value::Boolean(l <= r),
+            Operator::Equals => Value::Boolean(l == r),
+            Operator::NotEquals => Value::Boolean(l != r),
+
+            _ => Value::Err(RuntimeError::BadExpression(
+                l.to_string(),
+                op.to_string(),
+                r.to_string(),
+            )),
+        }
+    }
+}
+
+impl Add for Value {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::Number(l), Self::Number(r)) => Self::Number(l + r),
+            (Self::String(l), Self::Number(r)) => Self::String(l + &r.to_string()),
+            (Self::String(l), Self::String(r)) => Self::String(l + &r),
+            (l, r) => Self::Err(RuntimeError::BadExpression(
+                l.to_string(),
+                "+".to_string(),
+                r.to_string(),
+            )),
+        }
+    }
+}
+
+impl Sub for Value {
+    type Output = f64;
+    fn sub(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::Number(l), Self::Number(r)) => l - r,
+            (l, r) => panic!("Invalid expression, {l} - {r}"),
+        }
+    }
+}
+
+impl Mul for Value {
+    type Output = f64;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::Number(l), Self::Number(r)) => l * r,
+            (l, r) => panic!("Invalid expression, {l} * {r}"),
+        }
+    }
+}
+
+impl Div for Value {
+    type Output = f64;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::Number(l), Self::Number(r)) => l / r,
+            (l, r) => panic!("Invalid expression, {l} / {r}"),
+        }
+    }
+}
+
+impl From<Value> for f64 {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Number(n) => n,
+            Value::Boolean(b) => {
+                if b {
+                    1f64
+                } else {
+                    0f64
+                }
+            }
+            Value::Nil => 0f64,
+            s => {
+                panic!("Cannot use {s} as number")
+            }
+        }
+    }
+}
+
+impl From<Value> for bool {
+    fn from(value: Value) -> bool {
+        match value {
+            Value::Boolean(b) => b,
+            Value::Number(n) => n != 0f64,
+            Value::String(s) => !s.is_empty(),
+            Value::Err(_) => false,
+            Value::Fmca(_) => false,
+            Value::Nil => false,
+        }
+    }
+}
+
+impl From<crate::values::tape::Value<'_>> for Value {
+    fn from(value: crate::values::tape::Value<'_>) -> Self {
+        match value {
+            super::tape::Value::Nil => Value::Nil,
+            super::tape::Value::Array(_a) => Value::Number(0f64),
+            super::tape::Value::String(s) => Value::String(s.inner.clone()),
+            super::tape::Value::Function(_f) => Value::Number(0f64),
+            super::tape::Value::Number(n) => Value::Number(n),
+            super::tape::Value::Integer(i) => Value::Number(i as f64),
+        }
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::String(v) => write!(f, "{v}"),
+            Self::Number(v) => write!(f, "{v}"),
+            Self::Boolean(v) => write!(f, "{v}"),
+            Self::Err(v) => write!(f, "{v}"),
+            Self::Fmca(v) => write!(f, "{v}"),
+            Self::Nil => write!(f, "Nil"),
+        }
+    }
+}
+
+impl Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Plus => write!(f, "+"),
+            Self::Minus => write!(f, "-"),
+            Self::Greater => write!(f, ">"),
+            Self::Less => write!(f, "<"),
+            Self::GreaterEquals => write!(f, ">="),
+            Self::LessEquals => write!(f, "<="),
+            Self::Multiply => write!(f, "*"),
+            Self::Divide => write!(f, "/"),
+            Self::Equals => write!(f, "=="),
+            Self::NotEquals => write!(f, "!="),
+            Self::BinaryOr => write!(f, "oug"),
+            Self::BinaryXor => write!(f, "xoug"),
+            Self::BinaryAnd => write!(f, "aoug"),
+            Self::LogicalOr => write!(f, "ouoD"),
+            Self::LogicalXor => write!(f, "xuoD"),
+            Self::LogicalAnd => write!(f, "auoD"),
+            Self::BitShiftLeft => write!(f, "lump"),
+            Self::BitShiftRight => write!(f, "rump"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Text {
+    pub inner: String,
+}
+impl AllocObject<LiteralList> for Text {
+    const TYPE_ID: LiteralList = LiteralList::String;
+}
+impl AllocObject<TypeList> for Text {
+    const TYPE_ID: TypeList = TypeList::String;
+}
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Self {
+            inner: value.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    nodes: Box<[Stmt]>,
+}
+impl AllocObject<TypeList> for Function {
+    const TYPE_ID: TypeList = TypeList::Function;
+}
+impl Function {
+    pub fn get_nodes<'guard>(&self) -> &'guard [Stmt] {
+        &self.nodes
+    }
+
+    pub fn new(nodes: Box<[Stmt]>) -> Self {
+        Self { nodes }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Array {}

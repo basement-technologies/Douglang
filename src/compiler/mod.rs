@@ -1,4 +1,4 @@
-use crate::ast::Stmt;
+use crate::parser::ast::Stmt;
 
 const LAUNCHER_TEMPLATE: &str = include_str!("launcher.c");
 
