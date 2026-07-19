@@ -9,6 +9,6 @@ loop [
 
     Bald
     prediction (Doug) >= 100 [
-        Believers win [ break ]
+        believers win [ end stream ]
     ]
 ]

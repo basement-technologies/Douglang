@@ -3,6 +3,6 @@ Doug set 5
 loop [
     Bald set "Laundry in " +set (Doug) +set "." tts
 	  Doug -set 1
-    prediction (Doug Doug) = 0 [Believers win [break]]
+    prediction (Doug Doug) = 0 [believers win [end stream]]
 ]
 tts "LAUNDRY!!!!!!!" 

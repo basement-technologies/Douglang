@@ -67,14 +67,14 @@ fn match_token(s: &str) -> Option<Token> {
         "set" => Some(Token::KeyWord(KeyWord::Set)),
         "Doug" => Some(Token::KeyWord(KeyWord::DougChain(1))),
         "Bald" => Some(Token::KeyWord(KeyWord::Bald)),
-        "Rigged" => Some(Token::KeyWord(KeyWord::Rigged)),
+        "rigged" => Some(Token::KeyWord(KeyWord::Rigged)),
         "loop" => Some(Token::KeyWord(KeyWord::Loop)),
         "prediction" => Some(Token::KeyWord(KeyWord::Prediction)),
-        "Believers" => Some(Token::KeyWord(KeyWord::Believers)),
-        "Doubters" => Some(Token::KeyWord(KeyWord::Doubters)),
+        "believers" => Some(Token::KeyWord(KeyWord::Believers)),
+        "doubters" => Some(Token::KeyWord(KeyWord::Doubters)),
         "win" => Some(Token::KeyWord(KeyWord::Wins)),
-        "end_stream" => Some(Token::KeyWord(KeyWord::EndStream)),
-        "five_minute_coding_adventure" => Some(Token::KeyWord(KeyWord::FiveMinuteCodingAdventure)),
+        "end stream" => Some(Token::KeyWord(KeyWord::EndStream)),
+        "five minute coding adventure" => Some(Token::KeyWord(KeyWord::FiveMinuteCodingAdventure)),
         "call" => Some(Token::KeyWord(KeyWord::Call)),
         "guoD" => Some(Token::KeyWord(KeyWord::Guod)),
 
@@ -176,7 +176,27 @@ fn merge_words(words: &[&str]) -> Box<[String]> {
         }
     }
 
-    merged.into()
+    let mut merge_keyword: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < merged.len() {
+        if i + 3 < merged.len()
+            && merged[i] == "five"
+            && merged[i + 1] == "minute"
+            && merged[i + 2] == "coding"
+            && merged[i + 3] == "adventure"
+        {
+            merge_keyword.push("five minute coding adventure".to_string());
+            i += 4;
+        } else if i + 1 < merged.len() && merged[i] == "end" && merged[i + 1] == "stream" {
+            merge_keyword.push("end stream".to_string());
+            i += 2;
+        } else {
+            merge_keyword.push(merged[i].clone());
+            i += 1;
+        }
+    }
+
+    merge_keyword.into()
 }
 
 /// Creates a list of potential [`Token`]s from a [`word`] input. If there is an error parsing
