@@ -179,18 +179,17 @@ fn merge_words(words: &[&str]) -> Box<[String]> {
     let mut merge_keyword: Vec<String> = Vec::new();
     let mut i = 0;
     while i < merged.len() {
-        if i + 3 < merged.len()
-            && merged[i] == "five"
-            && merged[i + 1] == "minute"
-            && merged[i + 2] == "coding"
-            && merged[i + 3] == "adventure"
-        {
-            merge_keyword.push("five minute coding adventure".to_string());
-            i += 4;
-        } else if i + 1 < merged.len() && merged[i] == "end" && merged[i + 1] == "stream" {
-            merge_keyword.push("end stream".to_string());
-            i += 2;
-        } else {
+        let mut matched = false;
+        for j in ((i + 1)..=merged.len()).rev() {
+            let candidate = merged[i..j].join(" ");
+            if match_token(&candidate).is_some() {
+                merge_keyword.push(candidate);
+                i = j;
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
             merge_keyword.push(merged[i].clone());
             i += 1;
         }
