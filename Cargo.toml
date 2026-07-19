@@ -1,6 +1,6 @@
 [package]
 name = "douglang"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Douglang interpreter and compiler"
 
@@ -19,3 +19,5 @@ image = "0.25"
 ab_glyph = "0.2"
 flate2 = "1"
 libffi = "5"
+thiserror = "2.0.18"
+clap = { version = "4.6.2", features = ["derive"] }

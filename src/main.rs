@@ -1,12 +1,9 @@
-mod ast;
-mod compiler;
-mod dougterface;
-mod interpreter;
-mod lexer;
-mod parser;
-mod runtime;
-mod token;
-mod tts;
+use clap::{ArgAction, Parser};
+use douglang::values::tape::LiteralHeader;
+use douglang::values::tape::Mutator;
+use douglang::values::tape::MutatorView;
+use douglang::values::tape::StickyImmixHeap;
+use douglang::*;
 
 use std::env;
 use std::fs;
@@ -15,121 +12,80 @@ use std::process;
 use std::sync::Arc;
 use std::time::Instant;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.get(1).is_some_and(|arg| arg == "--run-source-helper") {
-        let Some(path) = args.get(2) else {
-            eprintln!("--run-source-helper requires a source file path");
-            process::exit(1);
-        };
-        let source = match fs::read_to_string(path) {
-            Ok(source) => source,
-            Err(e) => {
-                eprintln!("couldn't read compiled source: {e}");
-                process::exit(1);
-            }
-        };
+/// The Doug language interpreter / compiler.
+///
+/// Normal usage: `douglang <input.doug> [--compile [output.c]] [--cc [binary]]
+/// [--link <lib>...] [--no-gui]`
+///
+/// The `--run-source-helper`, `--tts-helper`, `--tts-helper-quiet`, and
+/// `--dougterface-helper` flags are internal re-exec entry points used by the
+/// interpreter itself (via `env::current_exe()`), not meant for direct use.
+#[derive(Parser, Debug)]
+#[command(name = "douglang")]
+struct Cli {
+    /// Input .doug source file (normal invocation)
+    input: Option<String>,
+    /// Compile to C source instead of interpreting. Optional output path
+    /// (defaults to `<input>.c`).
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    compile: Option<String>,
+    /// Compile and link with gcc. Optional binary name (defaults to
+    /// `<input>.out` / `<input>.exe`).
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    cc: Option<String>,
+    /// Link additional libraries. Repeatable (`--link a --link b`) or
+    #[arg(long = "link", num_args = 1.., action = ArgAction::Append)]
+    link: Vec<String>,
+    #[arg(long = "no-gui")]
+    no_gui: bool,
+    // --- internal helper entry points (hidden from --help) ---
+    #[arg(long = "run-source-helper", hide = true, value_name = "PATH")]
+    run_source_helper: Option<String>,
+    #[arg(long = "tts-helper", hide = true, num_args = 2..=3, value_names = ["MODE", "PATH", "STATE"])]
+    tts_helper: Option<Vec<String>>,
+    #[arg(long = "tts-helper-quiet", hide = true, num_args = 2..=3, value_names = ["MODE", "PATH", "STATE"])]
+    tts_helper_quiet: Option<Vec<String>>,
+    #[arg(long = "dougterface-helper", hide = true, value_name = "PATH")]
+    dougterface_helper: Option<String>,
+}
 
-        let mut linked_libs = Vec::new();
-        let mut i = 3;
-        while i < args.len() {
-            if args[i] == "--link" {
-                i += 1;
-                if i < args.len() {
-                    linked_libs.push(args[i].clone());
-                }
-            }
-            i += 1;
-        }
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cli = Cli::parse();
 
-        let tokens = match lexer::lex(&source) {
-            Ok(tokens) => tokens,
-            Err(e) => {
-                eprintln!("{e}");
-                process::exit(1);
-            }
-        };
-        let ast = match parser::parse(&tokens) {
-            Ok(ast) => ast,
-            Err(e) => {
-                eprintln!("{e}");
-                process::exit(1);
-            }
-        };
-
-        let tts = Arc::new(tts::Tts::new());
-        let mut gui = dougterface::Dougterface::new(&tts);
-        gui.start(&tts);
-        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs);
-        if let Err(e) = interp.run(&ast) {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-        tts.wait();
-        gui.stop();
-        return;
+    if let Some(path) = cli.run_source_helper {
+        run_source_helper(&path, cli.link);
+        return Ok(());
     }
 
-    if args
-        .get(1)
-        .is_some_and(|arg| arg == "--tts-helper" || arg == "--tts-helper-quiet")
-    {
-        let quiet = args.get(1).is_some_and(|arg| arg == "--tts-helper-quiet");
-        let Some(mode) = args.get(2) else {
-            eprintln!("--tts-helper requires a mode");
-            process::exit(1);
-        };
-        let Some(path) = args.get(3) else {
-            eprintln!("--tts-helper requires a text file path");
-            process::exit(1);
-        };
-        let state_path = args.get(4).cloned();
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(e) => {
-                eprintln!("couldn't read tts helper text: {e}");
-                process::exit(1);
-            }
-        };
-        let _ = fs::remove_file(path);
-        let tts = tts::Tts::new();
-        if let Some(state_path) = state_path {
-            tts.set_state_file(state_path);
-        }
-        if quiet {
-            tts.speak_audio_only(&text, mode == "overlap");
-        } else if mode == "overlap" {
-            tts.speak_overlap(&text);
-            tts.wait();
-        } else {
-            tts.speak(&text);
-        }
-        return;
+    if let Some(vals) = cli.tts_helper {
+        run_tts_helper(vals, false);
+        return Ok(());
     }
 
-    if args.get(1).is_some_and(|arg| arg == "--dougterface-helper") {
-        let Some(path) = args.get(2) else {
-            eprintln!("--dougterface-helper requires a state file path");
-            process::exit(1);
-        };
-        dougterface::run_file_helper(Path::new(path).to_path_buf());
-        return;
+    if let Some(vals) = cli.tts_helper_quiet {
+        run_tts_helper(vals, true);
+        return Ok(());
     }
 
-    if args.len() < 2 {
+    if let Some(path) = cli.dougterface_helper {
+        dougterface::run_file_helper(Path::new(&path).to_path_buf());
+        return Ok(());
+    }
+
+    let Some(input_path) = cli.input else {
         eprintln!(
             "usage: douglang <input.doug> [--compile [output.c]] [--cc [binary]] [--link <lib>...] [--no-gui]"
         );
         process::exit(1);
-    }
+    };
 
-    let input_name = Path::new(&args[1])
+    let input_name = Path::new(&input_path)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("out")
         .to_string();
 
-    let source = match fs::read_to_string(&args[1]) {
+    let source = match fs::read_to_string(&input_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("couldn't read input file: {e}");
@@ -139,53 +95,19 @@ fn main() {
 
     let start = Instant::now();
 
-    let tokens = match lexer::lex(&source) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-    };
+    let heap: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
+    let scope = MutatorView::new_with(&heap);
+    let mut parser = douglang::parser::Parser::new();
 
-    let ast = match parser::parse(&tokens) {
-        Ok(ast) => ast,
-        Err(e) => {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-    };
+    let linked_libs = cli.link;
 
-    let comp_mode = args.iter().any(|a| a == "--compile");
-    let cc_mode = args.iter().any(|a| a == "--cc");
+    if cli.compile.is_some() || cli.cc.is_some() {
+        let c_path = match &cli.compile {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => format!("{input_name}.c"),
+        };
 
-    let mut linked_libs: Vec<String> = Vec::new();
-    let mut i = 2;
-    while i < args.len() {
-        if args[i] == "--link" {
-            i += 1;
-            let mut found = false;
-            while i < args.len() && !args[i].starts_with("--") {
-                linked_libs.push(args[i].clone());
-                i += 1;
-                found = true;
-            }
-            if !found {
-                eprintln!("--link requires a library name");
-                process::exit(1);
-            }
-            continue;
-        }
-        i += 1;
-    }
-
-    if comp_mode || cc_mode {
-        let c_path = args
-            .iter()
-            .position(|a| a == "--compile")
-            .and_then(|i| args.get(i + 1))
-            .filter(|s| !s.starts_with("--"))
-            .cloned()
-            .unwrap_or(format!("{input_name}.c"));
+        let ast = parser.run(scope.get_data(), input_path)?;
 
         let helper_path = env::current_exe()
             .ok()
@@ -210,20 +132,14 @@ fn main() {
             elapsed.as_secs_f64()
         );
 
-        if cc_mode {
-            let binary_name = args
-                .iter()
-                .position(|a| a == "--cc")
-                .and_then(|i| args.get(i + 1))
-                .filter(|s| !s.starts_with("--"))
-                .cloned()
-                .unwrap_or_else(|| {
-                    if cfg!(windows) {
-                        format!("{input_name}.exe")
-                    } else {
-                        format!("{input_name}.out")
-                    }
-                });
+        if let Some(binary_opt) = &cli.cc {
+            let binary_name = if !binary_opt.is_empty() {
+                binary_opt.clone()
+            } else if cfg!(windows) {
+                format!("{input_name}.exe")
+            } else {
+                format!("{input_name}.out")
+            };
 
             let mut gcc_args: Vec<String> =
                 vec!["-o".into(), binary_name.clone(), c_path.to_string()];
@@ -267,22 +183,69 @@ fn main() {
         let elapsed = start.elapsed();
         eprintln!("parsed in {:.6} seconds", elapsed.as_secs_f64());
 
-        let no_gui = args.iter().any(|a| a == "--no-gui");
-        let tts = Arc::new(tts::Tts::new());
+        let tts = Arc::new(douglang::tts::Tts::new());
 
         let mut gui = dougterface::Dougterface::new(&tts);
-        if !no_gui {
+        if !cli.no_gui {
             gui.start(&tts);
         }
 
-        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs);
-        if let Err(e) = interp.run(&ast) {
+        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs, parser);
+        if let Err(e) = interp.run(&scope, input_path) {
             eprintln!("{e}");
             process::exit(1);
         }
 
         tts.wait();
         gui.stop();
+    }
+
+    Ok(())
+}
+
+fn run_source_helper(path: &str, linked_libs: Vec<String>) {
+    let heap: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
+    let scope = MutatorView::new_with(&heap);
+    let parser = douglang::parser::Parser::new();
+
+    let tts = Arc::new(douglang::tts::Tts::new());
+    let mut gui = dougterface::Dougterface::new(&tts);
+    gui.start(&tts);
+    let mut interpreter = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs, parser);
+
+    if let Err(e) = interpreter.run(&scope, path.to_string()) {
+        eprintln!("{e}");
+        process::exit(1);
+    }
+    tts.wait();
+    gui.stop();
+}
+
+fn run_tts_helper(vals: Vec<String>, quiet: bool) {
+    // vals is [mode, path] or [mode, path, state_path], enforced by num_args(2..=3)
+    let mode = &vals[0];
+    let path = &vals[1];
+    let state_path = vals.get(2).cloned();
+
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("couldn't read tts helper text: {e}");
+            process::exit(1);
+        }
+    };
+    let _ = fs::remove_file(path);
+    let tts = douglang::tts::Tts::new();
+    if let Some(state_path) = state_path {
+        tts.set_state_file(state_path);
+    }
+    if quiet {
+        tts.speak_audio_only(&text, mode == "overlap");
+    } else if mode == "overlap" {
+        tts.speak_overlap(&text);
+        tts.wait();
+    } else {
+        tts.speak(&text);
     }
 }
 

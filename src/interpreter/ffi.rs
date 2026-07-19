@@ -1,4 +1,5 @@
-use crate::runtime::{self, FfiArgKind, FfiReturnKind, RuntimeError, Value};
+use crate::runtime::{self, FfiArgKind, FfiReturnKind, RuntimeError};
+use crate::values::Value;
 
 #[cfg(windows)]
 pub fn ffi(func_name: &str, args: &[Value], linked_libs: &[String]) -> Result<Value, RuntimeError> {
@@ -170,8 +171,11 @@ fn call_ffi(
 
     for (value, kind) in args.iter().zip(signature.arg_kinds) {
         match kind {
-            FfiArgKind::Double => prepared.push(PreparedArg::Double(value.as_f64())),
-            FfiArgKind::UInt => prepared.push(PreparedArg::UInt(value.as_f64() as c_uint)),
+            FfiArgKind::Double => prepared.push(PreparedArg::Double(value.clone().into())),
+            FfiArgKind::UInt => {
+                let x: f64 = value.clone().into();
+                prepared.push(PreparedArg::UInt(x as c_uint));
+            }
             FfiArgKind::String => {
                 let text = value.to_string();
                 let cs = CString::new(text.as_str())
@@ -194,15 +198,15 @@ fn call_ffi(
     match signature.return_kind {
         FfiReturnKind::Int => {
             let result: c_int = unsafe { call(CodePtr(func_ptr), &fn_args) };
-            Ok(Value::Int(result as i64))
+            Ok(Value::Number(result as f64))
         }
         FfiReturnKind::UInt => {
             let result: c_uint = unsafe { call(CodePtr(func_ptr), &fn_args) };
-            Ok(Value::Int(result as i64))
+            Ok(Value::Number(result as f64))
         }
         FfiReturnKind::Double => {
             let result: f64 = unsafe { call(CodePtr(func_ptr), &fn_args) };
-            Ok(Value::Float(result))
+            Ok(Value::Number(result as f64))
         }
     }
 }
