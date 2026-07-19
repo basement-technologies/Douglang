@@ -10,6 +10,7 @@
   libclang,
   speechd,
   glib,
+  glibc,
 }:
 
 mkShell {
@@ -34,6 +35,6 @@ mkShell {
 
   shellHook = ''
     export LIBCLANG_PATH="${libclang.lib}/lib"
-    export BINDGEN_EXTRA_CLANG_ARGS="-I${speechd}/include"
+    export BINDGEN_EXTRA_CLANG_ARGS="-I${speechd}/include -I${glibc.dev}/include"
   '';
 }
