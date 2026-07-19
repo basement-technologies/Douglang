@@ -171,8 +171,11 @@ fn call_ffi(
 
     for (value, kind) in args.iter().zip(signature.arg_kinds) {
         match kind {
-            FfiArgKind::Double => prepared.push(PreparedArg::Double(value.as_f64())),
-            FfiArgKind::UInt => prepared.push(PreparedArg::UInt(value.as_f64() as c_uint)),
+            FfiArgKind::Double => prepared.push(PreparedArg::Double(value.clone().into())),
+            FfiArgKind::UInt => {
+                let x: f64 = value.clone().into();
+                prepared.push(PreparedArg::UInt(x as c_uint));
+            }
             FfiArgKind::String => {
                 let text = value.to_string();
                 let cs = CString::new(text.as_str())

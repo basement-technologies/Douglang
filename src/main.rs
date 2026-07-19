@@ -1,5 +1,9 @@
+use clap::{ArgAction, Parser};
+use douglang::values::tape::LiteralHeader;
+use douglang::values::tape::Mutator;
+use douglang::values::tape::MutatorView;
+use douglang::values::tape::StickyImmixHeap;
 use douglang::*;
-use tts::Tts;
 
 use std::env;
 use std::fs;
@@ -45,27 +49,27 @@ struct Cli {
     dougterface_helper: Option<String>,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
 
     if let Some(path) = cli.run_source_helper {
         run_source_helper(&path, cli.link);
-        return;
+        return Ok(());
     }
 
     if let Some(vals) = cli.tts_helper {
         run_tts_helper(vals, false);
-        return;
+        return Ok(());
     }
 
     if let Some(vals) = cli.tts_helper_quiet {
         run_tts_helper(vals, true);
-        return;
+        return Ok(());
     }
 
     if let Some(path) = cli.dougterface_helper {
         dougterface::run_file_helper(Path::new(&path).to_path_buf());
-        return;
+        return Ok(());
     }
 
     let Some(input_path) = cli.input else {
@@ -91,21 +95,9 @@ fn main() {
 
     let start = Instant::now();
 
-    let tokens = match lexer::lex(&source) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-    };
-
-    let ast = match parser::parse(&tokens) {
-        Ok(ast) => ast,
-        Err(e) => {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-    };
+    let heap: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
+    let scope = MutatorView::new_with(&heap);
+    let mut parser = douglang::parser::Parser::new();
 
     let linked_libs = cli.link;
 
@@ -114,6 +106,8 @@ fn main() {
             Some(p) if !p.is_empty() => p.clone(),
             _ => format!("{input_name}.c"),
         };
+
+        let ast = parser.run(scope.get_data(), input_path)?;
 
         let helper_path = env::current_exe()
             .ok()
@@ -189,15 +183,15 @@ fn main() {
         let elapsed = start.elapsed();
         eprintln!("parsed in {:.6} seconds", elapsed.as_secs_f64());
 
-        let tts = Arc::new(tts::Tts::new(tts::Backends::SpeechDispatcher));
+        let tts = Arc::new(douglang::tts::Tts::new());
 
         let mut gui = dougterface::Dougterface::new(&tts);
         if !cli.no_gui {
             gui.start(&tts);
         }
 
-        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs);
-        if let Err(e) = interp.run(&ast) {
+        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs, parser);
+        if let Err(e) = interp.run(&scope, input_path) {
             eprintln!("{e}");
             process::exit(1);
         }
@@ -205,37 +199,21 @@ fn main() {
         tts.wait();
         gui.stop();
     }
+
+    Ok(())
 }
 
 fn run_source_helper(path: &str, linked_libs: Vec<String>) {
-    let source = match fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(e) => {
-            eprintln!("couldn't read compiled source: {e}");
-            process::exit(1);
-        }
-    };
+    let heap: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
+    let scope = MutatorView::new_with(&heap);
+    let parser = douglang::parser::Parser::new();
 
-    let tokens = match lexer::lex(&source) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-    };
-    let ast = match parser::parse(&tokens) {
-        Ok(ast) => ast,
-        Err(e) => {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-    };
-
-    let tts = Arc::new(tts::Tts::new(tts::Backends::SpeechDispatcher));
+    let tts = Arc::new(douglang::tts::Tts::new());
     let mut gui = dougterface::Dougterface::new(&tts);
     gui.start(&tts);
-    let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs);
-    if let Err(e) = interp.run(&ast) {
+    let mut interpreter = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs, parser);
+
+    if let Err(e) = interpreter.run(&scope, path.to_string()) {
         eprintln!("{e}");
         process::exit(1);
     }
@@ -257,7 +235,7 @@ fn run_tts_helper(vals: Vec<String>, quiet: bool) {
         }
     };
     let _ = fs::remove_file(path);
-    let tts = tts::Tts::new(tts::Backends::SpeechDispatcher);
+    let tts = douglang::tts::Tts::new();
     if let Some(state_path) = state_path {
         tts.set_state_file(state_path);
     }

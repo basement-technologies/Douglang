@@ -76,7 +76,7 @@ impl<T> ScopedRef<T> for RawPtr<T> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct ScopedPtr<'guard, T: Sized> {
     value: &'guard T,
 }
@@ -112,6 +112,21 @@ impl<T> Tagged<T> for RawPtr<T> {
 #[derive(Clone)]
 pub struct TaggedCellPtr {
     inner: Cell<TaggedPtr>,
+}
+
+impl PartialEq for TaggedCellPtr {
+    fn eq(&self, other: &Self) -> bool {
+        self.get(&TestGuard {}).get_value() == other.get(&TestGuard {}).get_value()
+    }
+}
+
+impl PartialOrd for TaggedCellPtr {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let v: crate::values::Value = self.get(&TestGuard {}).get_value().into();
+        let v2: crate::values::Value = other.get(&TestGuard {}).get_value().into();
+
+        v.partial_cmp(&v2)
+    }
 }
 
 pub struct TestGuard {}
@@ -160,7 +175,7 @@ impl TaggedCellPtr {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Value<'guard> {
     String(ScopedPtr<'guard, Text>),
     Function(ScopedPtr<'guard, Function>),
@@ -225,6 +240,11 @@ impl From<RawPtr<f64>> for FatPtr {
 impl From<RawPtr<bool>> for FatPtr {
     fn from(value: RawPtr<bool>) -> Self {
         FatPtr::Number(i32::from(*value) as f64)
+    }
+}
+impl From<RawPtr<Nil>> for FatPtr {
+    fn from(_value: RawPtr<Nil>) -> Self {
+        FatPtr::Nil
     }
 }
 

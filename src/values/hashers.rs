@@ -1,13 +1,14 @@
 use std::{
     hash::{BuildHasher, Hasher},
-    ops::Deref,
+    ops::BitXor,
 };
 
 use crate::{
     parser::ast::{DougChain, Expr, Reference, Stmt},
-    values::{Operator, operator, value::Function},
+    values::{Operator, value::Function},
 };
 
+#[derive(Clone)]
 pub struct FxHasher {
     hash: usize,
     pub indexes: Vec<i32>,
@@ -38,6 +39,7 @@ impl Hasher for FxHasher {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct BuildFxHasher {}
 impl BuildHasher for BuildFxHasher {
     type Hasher = FxHasher;
@@ -66,6 +68,12 @@ impl HashNode for String {
     }
 }
 
+impl HashNode for bool {
+    fn hash_node(&self, hasher: &mut FxHasher) {
+        hasher.write_u8(*self as u8)
+    }
+}
+
 impl<T: HashNode> HashNode for Option<T> {
     fn hash_node(&self, hasher: &mut FxHasher) {
         match self {
@@ -87,6 +95,12 @@ impl<T: HashNode> HashNode for [T] {
     }
 }
 
+impl<T: HashNode> HashNode for Box<T> {
+    fn hash_node(&self, hasher: &mut FxHasher) {
+        (**self).hash_node(hasher);
+    }
+}
+
 impl<T: HashNode> HashNode for Box<[T]> {
     fn hash_node(&self, hasher: &mut FxHasher) {
         (**self).hash_node(hasher);
@@ -98,12 +112,18 @@ impl HashNode for Reference {
         match self {
             Self::Doug(DougChain { count }) => {
                 hasher.write_u8(1);
-                hasher.write(count.to_le_bytes());
+                hasher.write(&count.to_le_bytes());
             }
             Self::Variable(name) => {
                 name.hash_node(hasher);
             }
         }
+    }
+}
+
+impl HashNode for DougChain {
+    fn hash_node(&self, hasher: &mut FxHasher) {
+        hasher.write_usize(self.count);
     }
 }
 
@@ -116,12 +136,15 @@ impl HashNode for Operator {
 impl HashNode for Expr {
     fn hash_node(&self, hasher: &mut FxHasher) {
         match self {
-            Expr::Literal(v) => {
-                hasher.write_u8(1);
+            Expr::Literal(_) => {
+                hasher.write_i32(1);
+            }
+            Expr::Variable(v) => {
+                v.hash_node(hasher);
             }
             Expr::Rigged { func, args } => {
                 func.hash_node(hasher);
-                args.into().hash_node(hasher);
+                args.clone().into_boxed_slice().hash_node(hasher);
             }
             Expr::Condition {
                 left,
@@ -136,10 +159,10 @@ impl HashNode for Expr {
                 name.hash_node(hasher);
             }
             Expr::DougSequence { chains } => {
-                chains.into().hash_node(hasher);
+                chains.clone().hash_node(hasher);
             }
             Expr::MainTapeDougSequence { chains } => {
-                chains.into().hash_node(hasher);
+                chains.clone().hash_node(hasher);
             }
         }
     }
@@ -172,6 +195,9 @@ impl HashNode for Stmt {
                 hasher.write(&[3]);
                 value.hash_node(hasher);
                 use_index.hash_node(hasher);
+            }
+            Stmt::Break => {
+                hasher.write_u8(1);
             }
             Stmt::Set { value, oper } => {
                 hasher.write(&[4]);
@@ -226,7 +252,7 @@ pub fn hash_function(func: &Function, hasher: &mut FxHasher) -> i32 {
     let mag = MIN_MAG + (raw % span);
 
     let attempted = -(mag as i32);
-    for i in hasher.indexes {
+    for i in &hasher.indexes {
         if i.abs_diff(attempted) < 16 {
             return hash_function(func, hasher);
         }

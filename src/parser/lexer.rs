@@ -8,7 +8,6 @@ use std::{
 use thiserror::Error;
 
 use crate::values::{
-    Operator,
     tape::{ROData, TaggedCellPtr},
 };
 
@@ -128,7 +127,7 @@ fn merge_words(words: &[&str]) -> Box<[String]> {
                     split.push(chars[i].to_string());
                     i += 1;
                 }
-                's' if chars.get(i + 1) == Some(&'s') && chars[i - 2..=i] == "tts" => {
+                's' if chars.get(i + 1) == Some(&'s') && chars[i - 2..=i] == ['t', 't', 's'] => {
                     if !current.is_empty() {
                         split.push(current.clone());
                         current.clear();

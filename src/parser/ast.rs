@@ -1,19 +1,19 @@
 use crate::values::{Operator, tape::TaggedCellPtr};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct DougChain {
     pub count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Expr {
     Literal(TaggedCellPtr),
     Variable(String),
     DougSequence {
-        chains: Vec<DougChain>,
+        chains: Box<[Reference]>,
     },
     MainTapeDougSequence {
-        chains: Vec<DougChain>,
+        chains: Box<[Reference]>,
     },
     Rigged {
         func: String,
@@ -29,12 +29,13 @@ pub enum Expr {
     },
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Reference {
     Doug(DougChain),
     Variable(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Stmt {
     Doug {
         chains: Box<[Reference]>,
@@ -57,6 +58,7 @@ pub enum Stmt {
         value: Expr,
         oper: Option<Operator>,
     },
+    Break,
     Expr(Expr),
     Loop {
         body: Box<[Stmt]>,
@@ -70,4 +72,10 @@ pub enum Stmt {
         name: String,
         body: Box<[Stmt]>,
     },
+}
+
+impl From<DougChain> for Reference {
+    fn from(chain: DougChain) -> Self {
+        Reference::Doug(chain)
+    }
 }

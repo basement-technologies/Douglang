@@ -1,4 +1,5 @@
 use crate::parser::lexer::LexerError;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum SyntaxError {

@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     marker::PhantomData,
     mem::replace,
-    ops::{BitXor, Deref},
+    ops::Deref,
     ptr::{NonNull, write},
     slice::from_raw_parts_mut,
 };
@@ -23,12 +23,11 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    interpreter::RuntimeError,
     runtime::RuntimeError,
     values::{
         Literal,
         hashers::BuildFxHasher,
-        value::{Array, Function, Text},
+        value::{Array, Function, Nil, Text},
     },
 };
 
@@ -233,9 +232,9 @@ impl<'mem> ROData<'mem> {
     }
 }
 
-type TapeMap = Hashmap<ArraySize, TaggedCellPtr, BuildFxHasher>;
+type TapeMap = HashMap<ArraySize, TaggedCellPtr, BuildFxHasher>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct RuntimeTape {
     values_right: TapeMap,
     values_left: TapeMap,
@@ -243,7 +242,7 @@ pub struct RuntimeTape {
 }
 
 impl RuntimeTape {
-    fn container<'guard>(&self, idx: i32) -> (&'guard TapeMap, u32) {
+    fn container<'guard>(&'guard self, idx: i32) -> (&'guard TapeMap, u32) {
         if idx < 0 {
             (&self.values_left, (idx.abs() - 1).cast_unsigned())
         } else {
@@ -251,7 +250,7 @@ impl RuntimeTape {
         }
     }
 
-    fn container_mut<'guard>(&self, idx: i32) -> (&'guard mut TapeMap, u32) {
+    fn container_mut<'guard>(&'guard mut self, idx: i32) -> (&'guard mut TapeMap, u32) {
         if idx < 0 {
             (&mut self.values_left, (idx.abs() - 1).cast_unsigned())
         } else {
@@ -259,18 +258,26 @@ impl RuntimeTape {
         }
     }
 
-    pub fn get_pointer(&self, idx: i32, guard: &MutatorView) -> Option<TaggedCellPtr> {
+    pub fn new() -> Self {
+        Self {
+            values_left: TapeMap::with_hasher(BuildFxHasher {}),
+            values_right: TapeMap::with_hasher(BuildFxHasher {}),
+            cursor: 0,
+        }
+    }
+
+    pub fn get_pointer(&self, idx: i32) -> Option<&TaggedCellPtr> {
         let (container, idx) = self.container(idx);
-        container.get(idx)
+        container.get(&idx)
     }
 
     pub fn get(&self, idx: i32, guard: &MutatorView) -> Result<super::Value, RuntimeError> {
-        let (container, idx) = self.container(idx);
+        let (container, i) = self.container(idx);
 
         guard
             .get_tape()
-            .get_value(idx, guard, container)
-            .ok_or(RuntimeError::OutOfRange(i32))
+            .get_value(i, guard, container)
+            .ok_or(RuntimeError::OutOfRange(idx))
     }
 
     pub fn get_current(&self, guard: &MutatorView) -> Result<super::Value, RuntimeError> {
@@ -288,23 +295,23 @@ impl RuntimeTape {
     pub fn set_value(
         &mut self,
         guard: &MutatorView,
-        val: super::value,
+        val: super::Value,
     ) -> Result<(), RuntimeError> {
         let (container, idx) = self.container_mut(self.cursor);
         guard.get_tape().upsert_value(idx, val, container)
     }
 
-    pub fn clone_into(&self, idx: i32, values_within: ArraySize, guard: &MutatorView) -> Self {
+    pub fn clone_into(&self, idx: i32, values_within: ArraySize) -> Self {
         let mut pointers: Vec<(i32, TaggedCellPtr)> = Vec::new();
-        for i in idx..=idx + values_within {
-            if let Some(x) = self.get_pointer(i, guard) {
-                pointers.push((i, x));
+        for i in idx..=idx + values_within.cast_signed() {
+            if let Some(x) = self.get_pointer(i) {
+                pointers.push((i, x.clone()));
             }
         }
 
         let mut map = HashMap::with_hasher(BuildFxHasher {});
         for (idx, ptr) in pointers {
-            map.insert(idx, ptr);
+            map.insert(idx.cast_unsigned(), ptr);
         }
 
         Self {
@@ -363,13 +370,14 @@ impl Tape {
                 let text = Text::from(s);
                 self.alloc_tagged(text)?
             }
-            super::Value::Fmca(f) => self.alloc_tagged(f)?,
             super::Value::Err(e) => {
                 let text = Text::from(e.to_string());
                 self.alloc_tagged(text)?
             }
+            super::Value::Fmca(f) => self.alloc_tagged(f)?,
             super::Value::Number(n) => self.alloc_tagged(n)?,
             super::Value::Boolean(b) => self.alloc_tagged(b)?,
+            super::Value::Nil => self.alloc_tagged(Nil {})?,
         };
 
         if let Some(val) = map.get_mut(&idx) {

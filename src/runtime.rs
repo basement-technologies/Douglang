@@ -1,4 +1,4 @@
-use crate::ast::{DougChain, Stmt};
+use thiserror::Error;
 
 pub const RUNTIME_ERROR_DIVISION_BY_ZERO: &str = "division by zero";
 pub const RUNTIME_ERROR_MODULO_BY_ZERO: &str = "modulo by zero";

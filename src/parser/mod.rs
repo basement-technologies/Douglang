@@ -1,14 +1,14 @@
 pub mod ast;
 mod error;
-mod helpers;
-mod lexer;
+pub mod lexer;
 
+use lexer::{Lexer, LexerError};
 use std::collections::VecDeque;
 
 pub use error::SyntaxError;
 
 use crate::parser::ast::{DougChain, Reference};
-use crate::parser::lexer::{KeyWord, Lexer, ParenThesis, Token};
+use crate::parser::lexer::{KeyWord, ParenThesis, Token};
 use crate::runtime::RuntimeError;
 use crate::values::tape::{Mutator, ROData, TestGuard};
 use crate::values::{Operator, Value};
@@ -60,7 +60,7 @@ impl<'a> Mutator<'a> for Parser<'a> {
         &mut self,
         mem: &'a Self::Scope,
         input: Self::Input,
-    ) -> Result<Self::Output, crate::interpreter::RuntimeError> {
+    ) -> Result<Self::Output, crate::runtime::RuntimeError> {
         self.lexer = Some(Lexer::new(input, mem.clone()));
 
         self.parse()
@@ -418,7 +418,7 @@ impl<'a> Parser<'a> {
             match token {
                 Token::KeyWord(KeyWord::DougChain(count)) => {
                     self.consume()?;
-                    dougs.push(DougChain { count });
+                    dougs.push(Reference::Doug(DougChain { count }));
                 }
                 Token::Paren(ParenThesis::Right | ParenThesis::AngleRight) => {
                     return Ok(dougs.into());
@@ -450,9 +450,9 @@ impl<'a> Parser<'a> {
                 self.consume()?;
                 Box::new(Expr::Literal(lit))
             }
-            Ok(Token::KeyWord(KeyWord::DougChain(_))) => {
-                Box::new(Expr::DougSequence(self.parse_doug_expr()?))
-            }
+            Ok(Token::KeyWord(KeyWord::DougChain(_))) => Box::new(Expr::DougSequence {
+                chains: self.parse_doug_expr()?,
+            }),
 
             Ok(Token::Variable(v)) => {
                 self.consume()?;
@@ -503,7 +503,7 @@ impl<'a> Parser<'a> {
             | Some(Operator::LessEquals)
             | Some(Operator::GreaterEquals) => {}
             _ => {
-                return Err(SyntaxError::UnExpected(
+                return Err(SyntaxError::Unexpected(
                     format!("{op:?}"),
                     self.row,
                     self.column,

@@ -4,12 +4,11 @@ use std::{
 };
 
 use crate::{
-    interpreter::RuntimeError,
     parser::ast::Stmt,
     runtime::RuntimeError,
     values::{
         Operator,
-        tape::{AllocObject, LiteralList, MutatorView, TaggedScopedPtr, TypeList},
+        tape::{AllocObject, LiteralList, TypeList},
     },
 };
 
@@ -144,7 +143,7 @@ impl Display for Value {
             Self::Number(v) => write!(f, "{v}"),
             Self::Boolean(v) => write!(f, "{v}"),
             Self::Err(v) => write!(f, "{v}"),
-            Self::Fmca(v) => write!(f, "{v}"),
+            Self::Fmca(_) => write!(f, "<function>"),
             Self::Nil => write!(f, "Nil"),
         }
     }
@@ -175,7 +174,7 @@ impl Display for Operator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Text {
     pub inner: String,
 }
@@ -193,7 +192,7 @@ impl From<String> for Text {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Function {
     nodes: Box<[Stmt]>,
 }
@@ -201,7 +200,7 @@ impl AllocObject<TypeList> for Function {
     const TYPE_ID: TypeList = TypeList::Function;
 }
 impl Function {
-    pub fn get_nodes<'guard>(&self) -> &'guard [Stmt] {
+    pub fn get_nodes<'guard>(&'guard self) -> &'guard [Stmt] {
         &self.nodes
     }
 
@@ -210,5 +209,11 @@ impl Function {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct Nil {}
+impl AllocObject<TypeList> for Nil {
+    const TYPE_ID: TypeList = TypeList::Number;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Array {}

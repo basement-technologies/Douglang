@@ -1,18 +1,16 @@
-mod error;
 mod ffi;
 
-use crate::dougterface::Dougterface;
-use crate::parser;
+use crate::parser::Parser;
 use crate::parser::ast::{DougChain, Expr, Reference, Stmt};
-use crate::runtime::{self, RuntimeError};
+use crate::runtime::RuntimeError;
 use crate::tts::Tts;
-use crate::values::tape::{Mutator, MutatorView, RuntimeTape, TaggedCellPtr};
+use crate::values::tape::{Mutator, MutatorView, RuntimeTape};
 use crate::values::value::Function;
 use crate::values::{BuildFxHasher, FxHasher, Value, hash_function};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Flow {
     Continue,
     Return(Value),
@@ -25,19 +23,20 @@ enum TapeSelection {
     Main,
 }
 
-pub struct Interpreter {
+pub struct Interpreter<'a> {
     full_tape: RuntimeTape,
     scoped_tape: Option<RuntimeTape>,
     tts: Arc<Tts>,
     linked_libs: Vec<String>,
 
+    parser: Parser<'a>,
     hasher: FxHasher,
     adventure_names: HashMap<String, i32, BuildFxHasher>,
     active_tape: TapeSelection,
 }
 
-impl Interpreter {
-    pub fn new(tts: Arc<Tts>, linked_libs: Vec<String>) -> Self {
+impl<'a> Interpreter<'a> {
+    pub fn new(tts: Arc<Tts>, linked_libs: Vec<String>, parser: Parser<'a>) -> Self {
         let hasher = FxHasher::new();
 
         Interpreter {
@@ -46,8 +45,9 @@ impl Interpreter {
             tts,
             linked_libs,
             hasher,
+            parser,
             adventure_names: HashMap::with_hasher(BuildFxHasher {}),
-            active_tape: TapeSelection::Local,
+            active_tape: TapeSelection::Main,
         }
     }
 
@@ -66,11 +66,11 @@ impl Interpreter {
     }
 
     fn main_tape(&self) -> &RuntimeTape {
-        &self.full_tape.as_ref().unwrap_or(&self.tape)
+        &self.full_tape
     }
 
     fn main_tape_mut(&mut self) -> &mut RuntimeTape {
-        &mut self.full_tape.as_mut().unwrap_or(&mut self.tape)
+        &mut self.full_tape
     }
 
     fn get_doug_notation_index(
@@ -94,7 +94,10 @@ impl Interpreter {
 
         res_i += starting_value;
 
-        for (i, chain) in chains.iter().next().enumerate() {
+        for (i, chain) in chains.iter().skip(1).enumerate() {
+            let Reference::Doug(chain) = chain else {
+                return Err(RuntimeError::Unexpected("variable name".to_string()));
+            };
             let value = 1 << (chain.count - 1);
 
             if i % 2 == if from_negative { 0 } else { 1 } {
@@ -107,21 +110,29 @@ impl Interpreter {
         Ok((res_i, !from_negative))
     }
 
-    fn resolve_dougs(&self, chains: &[Reference], start_i: i32) -> (i32, &RuntimeTape) {
+    fn resolve_dougs(
+        &self,
+        chains: &[Reference],
+        start_i: i32,
+    ) -> Result<(i32, &RuntimeTape), RuntimeError> {
         let (idx, func_call) = self.get_doug_notation_index(chains.into(), start_i)?;
         if func_call {
-            (idx, self.main_tape())
+            Ok((idx, self.main_tape()))
         } else {
-            (idx, self.current_tape())
+            Ok((idx, self.current_tape()))
         }
     }
 
-    fn resolve_dougs_mut(&self, chains: &[Reference], start_i: i32) -> (i32, &RuntimeTape) {
+    fn resolve_dougs_mut(
+        &mut self,
+        chains: &[Reference],
+        start_i: i32,
+    ) -> Result<(i32, &mut RuntimeTape), RuntimeError> {
         let (idx, func_call) = self.get_doug_notation_index(chains.into(), start_i)?;
         if func_call {
-            (idx, self.main_tape_mut())
+            Ok((idx, self.main_tape_mut()))
         } else {
-            (idx, self.current_tape_mut())
+            Ok((idx, self.current_tape_mut()))
         }
     }
 
@@ -130,8 +141,8 @@ impl Interpreter {
             return Err(RuntimeError::NotAFunction);
         };
 
-        let old_tape = *self.current_tape();
-        let new_tape = old_tape.clone_into(idx, 16, guard);
+        let old_tape = self.current_tape().clone();
+        let new_tape = old_tape.clone_into(idx, 16);
         *self.main_tape_mut() = new_tape;
         let v = match self.process(block.get_nodes(), guard) {
             Ok(Flow::Return(v)) => v,
@@ -142,22 +153,22 @@ impl Interpreter {
         Ok(v)
     }
 
-    fn eval_expr(&self, expr: &Expr, mem: &MutatorView) -> Result<Value, RuntimeError> {
+    fn eval_expr(&mut self, expr: &Expr, mem: &MutatorView) -> Result<Value, RuntimeError> {
         match expr {
             Expr::Literal(lit) => Ok(lit.get(mem).get_value().into()),
             Expr::Variable(var) => {
                 let idx = *self
                     .adventure_names
-                    .get(name)
-                    .ok_or_else(|| RuntimeError::new(&format!("unknown adventure {name}")))?;
-                self.tape.get(idx, mem)
+                    .get(var)
+                    .ok_or_else(|| RuntimeError::new(&format!("unknown adventure {var}")))?;
+                self.main_tape().get(idx, mem)
             }
             Expr::DougSequence { chains } => {
-                let (idx, tape) = self.resolve_dougs(chains.into(), 0);
+                let (idx, tape) = self.resolve_dougs(chains, 0)?;
                 tape.get(idx, mem)
             }
             Expr::MainTapeDougSequence { chains } => {
-                let (idx, tape) = self.resolve_dougs(chains.into(), 0);
+                let (idx, tape) = self.resolve_dougs(chains, 0)?;
                 tape.get(idx, mem)
             }
             Expr::FmcaCall { name } => {
@@ -188,9 +199,11 @@ impl Interpreter {
                 if let Some(operator) = operator
                     && let Some(rhs) = right
                 {
-                    Ok(self
-                        .eval_expr(left, mem)?
-                        .apply_operator(*operator, self.eval_expr(rhs, mem)?))
+                    Ok(Value::apply_operator(
+                        self.eval_expr(left, mem)?,
+                        *operator,
+                        self.eval_expr(rhs, mem)?,
+                    ))
                 } else {
                     self.eval_expr(left, mem)
                 }
@@ -202,12 +215,14 @@ impl Interpreter {
         for node in nodes {
             match node {
                 Stmt::Set { value, oper } => match oper {
-                    None => self
-                        .current_tape_mut()
-                        .set_value(guard, self.eval_expr(value, mem)?)?,
+                    None => {
+                        let value = self.eval_expr(value, guard)?;
+                        let tape = self.current_tape_mut();
+                        tape.set_value(guard, value)?
+                    }
                     Some(op) => {
                         let l = self.current_tape().get_current(guard)?;
-                        let v = Value::apply_operator(l, *op, r);
+                        let v = Value::apply_operator(l, *op, self.eval_expr(value, guard)?);
                         self.current_tape_mut().set_value(guard, v)?;
                     }
                 },
@@ -222,7 +237,7 @@ impl Interpreter {
                     overlap,
                 } => {
                     let text = if *use_index {
-                        self.current_tape().current().to_string()
+                        self.current_tape().get_current(guard)?.to_string()
                     } else {
                         match msg {
                             Some(expr) => self.eval_expr(expr, guard)?.to_string(),
@@ -238,13 +253,8 @@ impl Interpreter {
                 }
 
                 Stmt::Doug { chains, reset } => {
-                    self.active_tape = TapeSelection::Local;
-                    let idx = if *reset {
-                        self.get_doug_notation_index(chains, 0)
-                    } else {
-                        self.get_doug_notation_index(chains, self.tape.cursor)
-                    }?;
-                    self.tape.set_index(idx);
+                    let (idx, tape) = self.resolve_dougs_mut(chains, if *reset { 0 } else { 1 })?;
+                    tape.set_cursor(idx);
                 }
 
                 Stmt::Loop { body } => loop {
@@ -257,10 +267,13 @@ impl Interpreter {
                     let v = if *use_index {
                         self.current_tape().get_current(guard)
                     } else {
-                        self.eval_expr(&value.unwrap(), guard)
+                        self.eval_expr(value.as_ref().unwrap(), guard)
                     }
                     .unwrap_or(Value::Nil);
                     return Ok(Flow::Return(v));
+                }
+                Stmt::Break => {
+                    return Ok(Flow::Break);
                 }
 
                 Stmt::Prediction {
@@ -268,7 +281,7 @@ impl Interpreter {
                     doubt_body,
                     condition,
                 } => {
-                    let flow = if self.eval_expr(condition, guard).into()? {
+                    let flow = if self.eval_expr(condition, guard)?.into() {
                         self.process(believe_body, guard)?
                     } else {
                         self.process(doubt_body, guard)?
@@ -279,7 +292,7 @@ impl Interpreter {
                 }
 
                 Stmt::FiveMinuteCodingAdventure { name, body } => {
-                    let function = Function::new(*body);
+                    let function = Function::new(body.clone());
                     let index = hash_function(&function, &mut self.hasher);
 
                     self.adventure_names.insert(name.clone(), index);
@@ -293,8 +306,8 @@ impl Interpreter {
                         &self.main_tape().cursor
                     } else {
                         self.adventure_names
-                            .get(&name.unwrap())
-                            .ok_or(RuntimeError::NotDefined(name.unwrap()))?
+                            .get(name.as_ref().unwrap())
+                            .ok_or(RuntimeError::NotDefined(name.as_ref().unwrap().clone()))?
                     };
 
                     self.run_function(*idx, guard);
@@ -317,7 +330,7 @@ impl<'a> Mutator<'a> for Interpreter<'a> {
     ) -> Result<Self::Output, RuntimeError> {
         match self.parser.run(mem.get_data(), input) {
             Ok(nodes) => {
-                self.interpret_block(&nodes, mem)?;
+                self.process(&nodes, mem)?;
             }
             Err(e) => {
                 eprintln!("Error: {e}");

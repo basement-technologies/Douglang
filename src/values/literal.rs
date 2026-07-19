@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::parsing::parser::SyntaxError;
+use crate::parser::SyntaxError;
 use crate::values::Value;
 use crate::values::tape::CellPtr;
 

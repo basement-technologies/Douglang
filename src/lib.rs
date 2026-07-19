@@ -1,8 +1,7 @@
-mod compiler;
-mod dougterface;
-mod interpreter;
-mod parser;
+pub mod compiler;
+pub mod dougterface;
+pub mod interpreter;
+pub mod parser;
 mod runtime;
-mod token;
-mod tts;
-mod values;
+pub mod tts;
+pub mod values;
