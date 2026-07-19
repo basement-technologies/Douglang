@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, BitXor, Div, Mul, Rem, Sub},
 };
 
 use crate::{
@@ -23,6 +23,14 @@ pub enum Value {
 }
 
 impl Value {
+    fn into_f64(self) -> f64 {
+        self.into()
+    }
+
+    fn into_bool(self) -> bool {
+        self.into()
+    }
+
     #[must_use]
     pub fn apply_operator(l: Self, op: Operator, r: Self) -> Self {
         match op {
@@ -32,6 +40,25 @@ impl Value {
             Operator::LessEquals => Value::Boolean(l <= r),
             Operator::Equals => Value::Boolean(l == r),
             Operator::NotEquals => Value::Boolean(l != r),
+            Operator::LogicalOr => Value::Boolean(l.into() || r.into()),
+            Operator::LogicalXor => Value::Boolean(l.into_bool().bitxor(r.into_bool())),
+            Operator::LogicalAnd => Value::Boolean(l.into() && r.into()),
+
+            Operator::Plus => l + r,
+            Operator::Minus => Value::Number(l - r),
+            Operator::Divide => Value::Number(l / r),
+            Operator::Multiply => Value::Number(l * r),
+            Operator::Modulo => Value::Number(l % r),
+
+            Operator::BinaryOr => {
+                Value::Number(f64::from(l.into_f64() as i32 | r.into_f64() as i32))
+            }
+            Operator::BinaryXor => {
+                Value::Number(f64::from(l.into_f64() as i32 ^ r.into_f64() as i32))
+            }
+            Operator::BinaryAnd => {
+                Value::Number(f64::from(l.into_f64() as i32 & r.into_f64() as i32))
+            }
 
             _ => Value::Err(RuntimeError::BadExpression(
                 l.to_string(),
@@ -91,6 +118,17 @@ impl Div for Value {
     }
 }
 
+impl Rem for Value {
+    type Output = f64;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::Number(l), Self::Number(r)) => ((l as i32) % (r as i32)) as f64,
+            (l, r) => panic!("Invaid expression, {l} % {r}"),
+        }
+    }
+}
+
 impl From<Value> for f64 {
     fn from(value: Value) -> Self {
         match value {
@@ -129,7 +167,9 @@ impl From<crate::values::tape::Value<'_>> for Value {
             super::tape::Value::Nil => Value::Nil,
             super::tape::Value::Array(_a) => Value::Number(0f64),
             super::tape::Value::String(s) => Value::String(s.inner.clone()),
-            super::tape::Value::Function(_f) => Value::Number(0f64),
+            super::tape::Value::Function(f) => {
+                Value::Fmca(Function::new(f.get_nodes().into_iter().cloned().collect()))
+            }
             super::tape::Value::Number(n) => Value::Number(n),
             super::tape::Value::Integer(i) => Value::Number(i as f64),
         }
@@ -160,6 +200,7 @@ impl Display for Operator {
             Self::LessEquals => write!(f, "<="),
             Self::Multiply => write!(f, "*"),
             Self::Divide => write!(f, "/"),
+            Self::Modulo => write!(f, "%"),
             Self::Equals => write!(f, "=="),
             Self::NotEquals => write!(f, "!="),
             Self::BinaryOr => write!(f, "oug"),
@@ -200,7 +241,7 @@ impl AllocObject<TypeList> for Function {
     const TYPE_ID: TypeList = TypeList::Function;
 }
 impl Function {
-    pub fn get_nodes<'guard>(&'guard self) -> &'guard [Stmt] {
+    pub fn get_nodes(&self) -> &[Stmt] {
         &self.nodes
     }
 

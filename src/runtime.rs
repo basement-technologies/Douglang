@@ -1,19 +1,11 @@
 use thiserror::Error;
 
-pub const RUNTIME_ERROR_DIVISION_BY_ZERO: &str = "division by zero";
-pub const RUNTIME_ERROR_MODULO_BY_ZERO: &str = "modulo by zero";
-pub const RUNTIME_ERROR_BREAK_OUTSIDE_LOOP: &str = "guoD can only be used inside loop";
-pub const RUNTIME_ERROR_INTEGER_OVERFLOW_MODULO: &str = "integer overflow during modulo";
 pub const TTS_STATE_TEXT_KEY: &str = "TEXT";
 pub const TTS_STATE_AMP_KEY: &str = "AMP";
 pub const TTS_STATE_SPEAKING_KEY: &str = "SPEAKING";
 pub const TTS_STATE_DONE_MARKER: &str = "__DOUGLANG_DONE__";
 pub const TTS_SPEAKING_AMP: f64 = 0.5;
 pub const TTS_IDLE_AMP: f64 = 0.0;
-
-pub fn doug_index_overflow_message(count: usize) -> String {
-    format!("Doug chain of length {count} is too large to index safely")
-}
 
 pub fn escape_tts_state_text(text: &str) -> String {
     text.replace('\\', "\\\\")
@@ -122,8 +114,8 @@ pub enum RuntimeError {
     #[error("{0}")]
     Unexpected(String),
 
-    #[error("Attempting to call what is not a function")]
-    NotAFunction,
+    #[error("Attempting to call {0}, which is not a function")]
+    NotAFunction(String),
 }
 
 impl RuntimeError {

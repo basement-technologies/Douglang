@@ -7,9 +7,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::values::{
-    tape::{ROData, TaggedCellPtr},
-};
+use crate::values::tape::{ROData, TaggedCellPtr};
 
 #[derive(Clone, Copy, Debug)]
 pub enum KeyWord {
@@ -27,6 +25,7 @@ pub enum KeyWord {
     Call,
     FiveMinuteCodingAdventure,
     Guod,
+    Rigged,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -68,6 +67,7 @@ fn match_token(s: &str) -> Option<Token> {
         "set" => Some(Token::KeyWord(KeyWord::Set)),
         "Doug" => Some(Token::KeyWord(KeyWord::DougChain(1))),
         "Bald" => Some(Token::KeyWord(KeyWord::Bald)),
+        "Rigged" => Some(Token::KeyWord(KeyWord::Rigged)),
         "loop" => Some(Token::KeyWord(KeyWord::Loop)),
         "prediction" => Some(Token::KeyWord(KeyWord::Prediction)),
         "Believers" => Some(Token::KeyWord(KeyWord::Believers)),
@@ -89,6 +89,7 @@ fn match_token(s: &str) -> Option<Token> {
         "-" => Some(Token::Operator(Operator::Minus)),
         "*" => Some(Token::Operator(Operator::Multiply)),
         "/" => Some(Token::Operator(Operator::Divide)),
+        "%" => Some(Token::Operator(Operator::Modulo)),
 
         "lump" => Some(Token::Operator(Operator::BitShiftRight)),
         "rump" => Some(Token::Operator(Operator::BitShiftLeft)),

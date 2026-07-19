@@ -1,10 +1,12 @@
 five_minute_coding_adventure add [
-    DougDougDoug Doug set (Doug) +set (DougDoug)
-    guoD 
+    DougDougDoug Doug set 0
+    
+    +set (Doug DougDoug) +set (DougDoug DougDougDoug)
+    guoD (Doug Doug)
 ]
 
 DougDougDoug Doug DougDoug set "6 + 7 is: "
 
-add Doug set 6 Doug set 7 add call
-Bald DougDougDoug Doug DougDoug +set (add DougDougDoug Doug) 
+add Doug set 6 Doug set 7 
+Bald DougDougDoug Doug DougDoug +set (call add) 
 tts

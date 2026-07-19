@@ -51,6 +51,17 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    #[allow(unused)]
+    #[inline]
+    pub fn print_state(&self) {
+        for (i, v) in self
+            .current_tape()
+            .get_values(Some(self.current_tape().cursor))
+        {
+            println!("{} {:?}", i, v);
+        }
+    }
+
     fn current_tape(&self) -> &RuntimeTape {
         match self.active_tape {
             TapeSelection::Scoped => self.scoped_tape.as_ref().unwrap_or(&self.full_tape),
@@ -78,10 +89,8 @@ impl<'a> Interpreter<'a> {
         chains: &[Reference],
         start_i: i32,
     ) -> Result<(i32, bool), RuntimeError> {
-        let mut res_i = start_i;
-
         let (starting_value, from_negative) = match chains.first() {
-            None => return Err(RuntimeError::SegmentationFault),
+            None => (start_i, true),
             Some(Reference::Variable(name)) => (
                 *self
                     .adventure_names
@@ -89,10 +98,16 @@ impl<'a> Interpreter<'a> {
                     .ok_or(RuntimeError::NotDefined(name.clone()))?,
                 false,
             ),
-            Some(Reference::Doug(DougChain { count })) => (count.cast_signed() as i32, true),
+            Some(Reference::Doug(DougChain { count })) => {
+                (1 << ((count.cast_signed() as i32) - 1), true)
+            }
         };
 
-        res_i += starting_value;
+        let mut res_i = if from_negative {
+            start_i + starting_value
+        } else {
+            starting_value
+        };
 
         for (i, chain) in chains.iter().skip(1).enumerate() {
             let Reference::Doug(chain) = chain else {
@@ -100,7 +115,7 @@ impl<'a> Interpreter<'a> {
             };
             let value = 1 << (chain.count - 1);
 
-            if i % 2 == if from_negative { 0 } else { 1 } {
+            if i % 2 == if from_negative { 1 } else { 0 } {
                 res_i += value;
             } else {
                 res_i -= value;
@@ -110,12 +125,20 @@ impl<'a> Interpreter<'a> {
         Ok((res_i, !from_negative))
     }
 
+    fn get_tape_cursor(&self, chains: &[Reference]) -> i32 {
+        if let Some(Reference::Variable(_)) = chains.first() {
+            self.main_tape().cursor
+        } else {
+            self.current_tape().cursor
+        }
+    }
+
     fn resolve_dougs(
         &self,
         chains: &[Reference],
         start_i: i32,
     ) -> Result<(i32, &RuntimeTape), RuntimeError> {
-        let (idx, func_call) = self.get_doug_notation_index(chains.into(), start_i)?;
+        let (idx, func_call) = self.get_doug_notation_index(chains, start_i)?;
         if func_call {
             Ok((idx, self.main_tape()))
         } else {
@@ -128,28 +151,32 @@ impl<'a> Interpreter<'a> {
         chains: &[Reference],
         start_i: i32,
     ) -> Result<(i32, &mut RuntimeTape), RuntimeError> {
-        let (idx, func_call) = self.get_doug_notation_index(chains.into(), start_i)?;
+        let (idx, func_call) = self.get_doug_notation_index(chains, start_i)?;
         if func_call {
             Ok((idx, self.main_tape_mut()))
         } else {
             Ok((idx, self.current_tape_mut()))
         }
     }
-
     fn run_function(&mut self, idx: i32, guard: &MutatorView) -> Result<Value, RuntimeError> {
-        let Value::Fmca(block) = self.full_tape.get(idx, guard)? else {
-            return Err(RuntimeError::NotAFunction);
+        let block = match self.full_tape.get(idx, guard)? {
+            Value::Fmca(f) => f,
+            other => return Err(RuntimeError::NotAFunction(other.to_string())),
         };
 
-        let old_tape = self.current_tape().clone();
+        self.active_tape = TapeSelection::Scoped;
+        let old_tape = self.full_tape.clone();
         let new_tape = old_tape.clone_into(idx, 16);
-        *self.main_tape_mut() = new_tape;
+        self.scoped_tape = Some(new_tape);
+
         let v = match self.process(block.get_nodes(), guard) {
             Ok(Flow::Return(v)) => v,
             Ok(_) => Value::Nil,
             Err(e) => return Err(e),
         };
-        *self.main_tape_mut() = old_tape;
+
+        self.scoped_tape = None;
+        self.active_tape = TapeSelection::Main;
         Ok(v)
     }
 
@@ -160,15 +187,17 @@ impl<'a> Interpreter<'a> {
                 let idx = *self
                     .adventure_names
                     .get(var)
-                    .ok_or_else(|| RuntimeError::new(&format!("unknown adventure {var}")))?;
+                    .ok_or_else(|| RuntimeError::new(format!("unknown adventure {var}")))?;
                 self.main_tape().get(idx, mem)
             }
             Expr::DougSequence { chains } => {
-                let (idx, tape) = self.resolve_dougs(chains, 0)?;
+                let cursor = self.get_tape_cursor(chains);
+                let (idx, tape) = self.resolve_dougs(chains, cursor)?;
                 tape.get(idx, mem)
             }
             Expr::MainTapeDougSequence { chains } => {
-                let (idx, tape) = self.resolve_dougs(chains, 0)?;
+                let cursor = self.get_tape_cursor(chains);
+                let (idx, tape) = self.resolve_dougs(chains, cursor)?;
                 tape.get(idx, mem)
             }
             Expr::FmcaCall { name } => {
@@ -213,6 +242,11 @@ impl<'a> Interpreter<'a> {
 
     fn process(&mut self, nodes: &[Stmt], guard: &MutatorView) -> Result<Flow, RuntimeError> {
         for node in nodes {
+            #[cfg(debug_assertions)]
+            {
+                self.print_state();
+                println!("{node:?}");
+            }
             match node {
                 Stmt::Set { value, oper } => match oper {
                     None => {
@@ -253,7 +287,9 @@ impl<'a> Interpreter<'a> {
                 }
 
                 Stmt::Doug { chains, reset } => {
-                    let (idx, tape) = self.resolve_dougs_mut(chains, if *reset { 0 } else { 1 })?;
+                    let cursor = self.get_tape_cursor(chains);
+                    let (idx, tape) =
+                        self.resolve_dougs_mut(chains, if *reset { 0 } else { cursor })?;
                     tape.set_cursor(idx);
                 }
 
@@ -296,12 +332,15 @@ impl<'a> Interpreter<'a> {
                     let index = hash_function(&function, &mut self.hasher);
 
                     self.adventure_names.insert(name.clone(), index);
+                    let cursor = self.main_tape_mut().cursor;
+                    self.main_tape_mut().set_cursor(index);
                     self.current_tape_mut()
-                        .set_value(guard, Value::Fmca(function));
+                        .set_value(guard, Value::Fmca(function))?;
+                    self.main_tape_mut().set_cursor(cursor);
                 }
 
                 Stmt::Call { name, use_index } => {
-                    assert!(name.is_none() && !*use_index);
+                    assert!(!name.is_none() || *use_index);
                     let idx = if *use_index {
                         &self.main_tape().cursor
                     } else {
@@ -310,7 +349,8 @@ impl<'a> Interpreter<'a> {
                             .ok_or(RuntimeError::NotDefined(name.as_ref().unwrap().clone()))?
                     };
 
-                    self.run_function(*idx, guard);
+                    println!("Presumed index of function: {idx}");
+                    self.run_function(*idx, guard)?;
                 }
             }
         }

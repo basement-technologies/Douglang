@@ -156,3 +156,9 @@ impl Tts {
         *self.amplitude.lock().unwrap()
     }
 }
+
+impl Default for Tts {
+    fn default() -> Self {
+        Self::new()
+    }
+}

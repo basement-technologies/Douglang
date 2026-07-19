@@ -242,7 +242,7 @@ pub struct RuntimeTape {
 }
 
 impl RuntimeTape {
-    fn container<'guard>(&'guard self, idx: i32) -> (&'guard TapeMap, u32) {
+    fn container(&self, idx: i32) -> (&TapeMap, u32) {
         if idx < 0 {
             (&self.values_left, (idx.abs() - 1).cast_unsigned())
         } else {
@@ -250,11 +250,29 @@ impl RuntimeTape {
         }
     }
 
-    fn container_mut<'guard>(&'guard mut self, idx: i32) -> (&'guard mut TapeMap, u32) {
+    fn container_mut(&mut self, idx: i32) -> (&mut TapeMap, u32) {
         if idx < 0 {
             (&mut self.values_left, (idx.abs() - 1).cast_unsigned())
         } else {
             (&mut self.values_right, (idx).cast_unsigned())
+        }
+    }
+
+    pub fn get_values(&self, centered: Option<i32>) -> Vec<(ArraySize, &TaggedCellPtr)> {
+        let base = self.values_right.iter().map(|x| (*x.0, x.1));
+
+        if let Some(idx) = centered {
+            let (container, index) = self.container(idx);
+
+            let mut scoped = Vec::new();
+            for i in 0..16 {
+                if let Some(x) = container.get(&(index + i)) {
+                    scoped.push((index + i, x))
+                }
+            }
+            scoped.into_iter().chain(base).collect()
+        } else {
+            base.collect()
         }
     }
 
@@ -274,10 +292,10 @@ impl RuntimeTape {
     pub fn get(&self, idx: i32, guard: &MutatorView) -> Result<super::Value, RuntimeError> {
         let (container, i) = self.container(idx);
 
-        guard
+        Ok(guard
             .get_tape()
             .get_value(i, guard, container)
-            .ok_or(RuntimeError::OutOfRange(idx))
+            .unwrap_or(super::Value::Number(0f64)))
     }
 
     pub fn get_current(&self, guard: &MutatorView) -> Result<super::Value, RuntimeError> {
@@ -302,23 +320,26 @@ impl RuntimeTape {
     }
 
     pub fn clone_into(&self, idx: i32, values_within: ArraySize) -> Self {
-        let mut pointers: Vec<(i32, TaggedCellPtr)> = Vec::new();
-        for i in idx..=idx + values_within.cast_signed() {
-            if let Some(x) = self.get_pointer(i) {
-                pointers.push((i, x.clone()));
+        let left: TapeMap = HashMap::with_hasher(BuildFxHasher {});
+        let mut right: TapeMap = HashMap::with_hasher(BuildFxHasher {});
+
+        for i in 0..values_within {
+            if let Some(x) = self.get_pointer(idx + i.cast_signed()) {
+                right.insert(i, x.clone());
             }
         }
 
-        let mut map = HashMap::with_hasher(BuildFxHasher {});
-        for (idx, ptr) in pointers {
-            map.insert(idx.cast_unsigned(), ptr);
-        }
-
         Self {
-            values_left: HashMap::with_hasher(BuildFxHasher {}),
-            values_right: map,
+            values_left: left,
+            values_right: right,
             cursor: 0,
         }
+    }
+}
+
+impl Default for RuntimeTape {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -423,7 +444,7 @@ impl<'memory> MutatorView<'memory> {
         Ok(TaggedScopedPtr::new(self, raw))
     }
 
-    pub fn get_tape(&'memory self) -> &'memory Tape {
+    fn get_tape(&'memory self) -> &'memory Tape {
         &self.tape
     }
 

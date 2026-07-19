@@ -10,8 +10,8 @@ pub use error::SyntaxError;
 use crate::parser::ast::{DougChain, Reference};
 use crate::parser::lexer::{KeyWord, ParenThesis, Token};
 use crate::runtime::RuntimeError;
-use crate::values::tape::{Mutator, ROData, TestGuard};
-use crate::values::{Operator, Value};
+use crate::values::Operator;
+use crate::values::tape::{Mutator, ROData};
 use ast::{Expr, Stmt};
 
 macro_rules! expect_token {
@@ -219,6 +219,16 @@ impl<'a> Parser<'a> {
                         })
                     }
                 }
+
+                Token::KeyWord(KeyWord::Rigged) => {
+                    if let Ok(Token::Variable(v)) = self.consume() {
+                        let mut args: Vec<Expr> = Vec::new();
+                        while let Ok(expr) = self.parse_expr() {
+                            args.push(expr);
+                        }
+                        nodes.push(Stmt::Expr(Expr::Rigged { func: v, args }))
+                    }
+                }
                 Token::KeyWord(KeyWord::Set) => {
                     nodes.push(Stmt::Set {
                         value: self.parse_expr()?,
@@ -241,50 +251,32 @@ impl<'a> Parser<'a> {
                     let condition = self.parse_expr()?;
                     expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
 
-                    let first_branch_token = self.consume()?;
-                    let keyword = match first_branch_token {
-                        Token::KeyWord(KeyWord::Believers) => KeyWord::Believers,
-                        Token::KeyWord(KeyWord::Doubters) => KeyWord::Doubters,
-                        other => {
-                            return Err(SyntaxError::Expected(
-                                "Believers, Doubters".to_string(),
-                                other.to_string(),
-                                self.row,
-                                self.column,
-                            ));
+                    let mut believers_body: Box<[Stmt]> = Vec::new().into();
+                    let mut doubters_body: Box<[Stmt]> = Vec::new().into();
+
+                    loop {
+                        match self.consume()? {
+                            Token::KeyWord(KeyWord::Believers) => {
+                                expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
+                                expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
+                                believers_body = self.parse_block(false)?;
+                            }
+                            Token::KeyWord(KeyWord::Doubters) => {
+                                expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
+                                expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
+                                doubters_body = self.parse_block(false)?;
+                            }
+                            Token::Paren(ParenThesis::SquareRight) => break,
+                            other => {
+                                return Err(SyntaxError::Expected(
+                                    "Believers, Doubters, ]".to_string(),
+                                    other.to_string(),
+                                    self.row,
+                                    self.column,
+                                ));
+                            }
                         }
-                    };
-
-                    expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-                    expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-
-                    let first_body = self.parse_block(false);
-                    expect_token!(self, Token::Paren(ParenThesis::SquareRight), "]");
-
-                    let second_branch_token = self.peek();
-                    let second_body = match (second_branch_token, keyword) {
-                        (Ok(Token::KeyWord(KeyWord::Doubters)), KeyWord::Doubters)
-                        | (Ok(Token::KeyWord(KeyWord::Believers)), KeyWord::Believers) => {
-                            return Err(SyntaxError::Expected(
-                                "Opposite branches".to_string(),
-                                "two of the same".to_string(),
-                                self.row,
-                                self.column,
-                            ));
-                        }
-                        (Ok(Token::KeyWord(KeyWord::Believers | KeyWord::Doubters)), _) => {
-                            let tokens = self.parse_block(false);
-                            expect_token!(self, Token::Paren(ParenThesis::SquareRight), "]");
-                            tokens
-                        }
-                        _ => Ok(Vec::new().into()),
-                    };
-
-                    let (doubters_body, believers_body) = if let KeyWord::Doubters = keyword {
-                        (first_body?, second_body?)
-                    } else {
-                        (second_body?, first_body?)
-                    };
+                    }
 
                     nodes.push(Stmt::Prediction {
                         believe_body: believers_body,
@@ -423,6 +415,10 @@ impl<'a> Parser<'a> {
                 Token::Paren(ParenThesis::Right | ParenThesis::AngleRight) => {
                     return Ok(dougs.into());
                 }
+                Token::Variable(v) => {
+                    self.consume()?;
+                    dougs.push(Reference::Variable(v));
+                }
                 _ => {
                     return Err(SyntaxError::Expected(
                         "Doug, Closing Brace".to_string(),
@@ -450,19 +446,40 @@ impl<'a> Parser<'a> {
                 self.consume()?;
                 Box::new(Expr::Literal(lit))
             }
-            Ok(Token::KeyWord(KeyWord::DougChain(_))) => Box::new(Expr::DougSequence {
-                chains: self.parse_doug_expr()?,
-            }),
+            Ok(Token::KeyWord(KeyWord::DougChain(_)) | Token::KeyWord(KeyWord::Bald)) => {
+                Box::new(Expr::DougSequence {
+                    chains: self.parse_doug_expr()?,
+                })
+            }
 
+            Ok(Token::Variable(_))
+                if let Some(Token::KeyWord(KeyWord::DougChain(_))) = self.peek_two() =>
+            {
+                Box::new(Expr::DougSequence {
+                    chains: self.parse_doug_expr()?,
+                })
+            }
             Ok(Token::Variable(v)) => {
                 self.consume()?;
                 Box::new(Expr::Variable(v))
             }
-            Ok(Token::KeyWord(KeyWord::Call))
-                if let Ok(Token::Literal(l)) = self.peek()
-                    && let Value::String(s) = l.get(&TestGuard {}).get_value().into() =>
-            {
+
+            Ok(Token::KeyWord(KeyWord::Call)) if let Some(Token::Variable(s)) = self.peek_two() => {
+                self.consume()?;
+                self.consume()?;
                 Box::new(Expr::FmcaCall { name: Some(s) })
+            }
+
+            Ok(Token::KeyWord(KeyWord::Rigged))
+                if let Some(Token::Variable(v)) = self.peek_two() =>
+            {
+                self.consume()?;
+                self.consume()?;
+                let mut args: Vec<Expr> = Vec::new();
+                while let Ok(expr) = self.parse_expr() {
+                    args.push(expr);
+                }
+                Box::new(Expr::Rigged { func: v, args })
             }
 
             Ok(Token::Paren(ParenThesis::Right)) => {
@@ -479,7 +496,7 @@ impl<'a> Parser<'a> {
             }
             Err(_) => return Err(SyntaxError::BreakFromExprTree),
         };
-        return Ok(expr);
+        Ok(expr)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
@@ -495,20 +512,6 @@ impl<'a> Parser<'a> {
                 }
             }
             _ => None,
-        };
-
-        match op {
-            Some(Operator::Greater)
-            | Some(Operator::Less)
-            | Some(Operator::LessEquals)
-            | Some(Operator::GreaterEquals) => {}
-            _ => {
-                return Err(SyntaxError::Unexpected(
-                    format!("{op:?}"),
-                    self.row,
-                    self.column,
-                ));
-            }
         };
 
         let Some(op) = op else {
