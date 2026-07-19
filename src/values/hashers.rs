@@ -196,7 +196,7 @@ impl HashNode for Stmt {
                 value.hash_node(hasher);
                 use_index.hash_node(hasher);
             }
-            Stmt::Break => {
+            Stmt::EndStream => {
                 hasher.write_u8(1);
             }
             Stmt::Set { value, oper } => {

@@ -58,7 +58,7 @@ pub enum Stmt {
         value: Expr,
         oper: Option<Operator>,
     },
-    Break,
+    EndStream,
     Expr(Expr),
     Loop {
         body: Box<[Stmt]>,

@@ -307,8 +307,8 @@ impl<'a> Parser<'a> {
                         nodes.push(Stmt::Set { value, oper: op });
                     }
                 }
-                Token::KeyWord(KeyWord::Break) => {
-                    nodes.push(Stmt::Break);
+                Token::KeyWord(KeyWord::EndStream) => {
+                    nodes.push(Stmt::EndStream);
                 }
                 Token::Paren(ParenThesis::Left) => {
                     let chains = self.parse_doug_expr()?;

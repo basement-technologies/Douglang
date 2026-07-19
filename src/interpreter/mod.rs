@@ -33,6 +33,7 @@ pub struct Interpreter<'a> {
     hasher: FxHasher,
     adventure_names: HashMap<String, i32, BuildFxHasher>,
     active_tape: TapeSelection,
+    top_level: bool,
 }
 
 impl<'a> Interpreter<'a> {
@@ -48,6 +49,7 @@ impl<'a> Interpreter<'a> {
             parser,
             adventure_names: HashMap::with_hasher(BuildFxHasher {}),
             active_tape: TapeSelection::Main,
+            top_level: true,
         }
     }
 
@@ -164,20 +166,28 @@ impl<'a> Interpreter<'a> {
             other => return Err(RuntimeError::NotAFiveMinuteCodingAdventure(other.to_string())),
         };
 
-        self.active_tape = TapeSelection::Scoped;
-        let old_tape = self.full_tape.clone();
-        let new_tape = old_tape.clone_into(idx, 16);
-        self.scoped_tape = Some(new_tape);
-
-        let v = match self.process(block.get_nodes(), guard) {
-            Ok(Flow::Return(v)) => v,
-            Ok(_) => Value::Nil,
-            Err(e) => return Err(e),
+        let is_top_level = self.top_level;
+        let previous_tape = self.scoped_tape.take();
+        let new_tape = if is_top_level {
+            self.full_tape.clone().clone_into(idx, 16)
+        } else {
+            previous_tape.as_ref().unwrap_or(&self.full_tape).clone().clone_into(idx, 16)
         };
 
-        self.scoped_tape = None;
-        self.active_tape = TapeSelection::Main;
-        Ok(v)
+        self.active_tape = TapeSelection::Scoped;
+        self.top_level = false;
+        self.scoped_tape = Some(new_tape);
+
+        let result = match self.process(block.get_nodes(), guard) {
+            Ok(Flow::Return(v)) => Ok(v),
+            Ok(_) => Ok(Value::Nil),
+            Err(e) => Err(e),
+        };
+
+        self.scoped_tape = previous_tape;
+        self.top_level = is_top_level;
+        self.active_tape = if is_top_level { TapeSelection::Main } else { TapeSelection::Scoped };
+        result
     }
 
     fn eval_expr(&mut self, expr: &Expr, mem: &MutatorView) -> Result<Value, RuntimeError> {
@@ -308,7 +318,7 @@ impl<'a> Interpreter<'a> {
                     .unwrap_or(Value::Nil);
                     return Ok(Flow::Return(v));
                 }
-                Stmt::Break => {
+                Stmt::EndStream => {
                     return Ok(Flow::Break);
                 }
 
