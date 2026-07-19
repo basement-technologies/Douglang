@@ -251,6 +251,7 @@ pub struct Lexer<'guard> {
     /// The mutator that provides access to modify the `Tape` - Required to allocate literals into
     /// it.
     data: ROData<'guard>,
+    comment: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -263,7 +264,36 @@ impl<'a> Lexer<'a> {
         let file = File::open(path.into()).expect("There should have been a valid path inputted");
         let reader = BufReader::new(file);
 
-        Self { reader, data }
+        Self {
+            reader,
+            data,
+            comment: false,
+        }
+    }
+
+    fn strip_comments(&mut self, input: &str) -> String {
+        let mut output = String::new();
+        let mut index = 0;
+
+        while index < input.len() {
+            if self.comment {
+                if let Some(end) = input[index..].find(":D") {
+                    index += end + 2;
+                    self.comment = false;
+                } else {
+                    break;
+                }
+            } else if input[index..].starts_with("D:") {
+                self.comment = true;
+                index += 2;
+            } else {
+                let char = input[index..].chars().next().unwrap();
+                output.push(char);
+                index += char.len_utf8();
+            }
+        }
+
+        output
     }
 
     /// Lex a block
@@ -285,6 +315,7 @@ impl<'a> Lexer<'a> {
                 }
             })?;
         let words = String::from_utf8(block).map_err(|_| LexerError::BinaryFile)?;
+        let words = self.strip_comments(&words);
         let data = &mut self.data;
         merge_words(&words.split_whitespace().collect::<Box<[_]>>())
             .iter()
@@ -311,6 +342,7 @@ impl<'a> Lexer<'a> {
                 return Err(LexerError::EOFReached);
             }
 
+            let line = self.strip_comments(line);
             let tokens = merge_words(&line.split_whitespace().collect::<Box<[_]>>());
 
             #[cfg(debug_assertions)]
