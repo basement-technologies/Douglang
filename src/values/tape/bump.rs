@@ -225,7 +225,7 @@ impl TypeHeader {
             TypeList::String => FatPtr::String(RawPtr::new(
                 StickyImmixHeap::get_object(self.into()).as_ptr().cast(),
             )),
-            TypeList::Function => FatPtr::Function(RawPtr::new(
+            TypeList::FiveMinuteCodingAdventure => FatPtr::FiveMinuteCodingAdventure(RawPtr::new(
                 StickyImmixHeap::get_object(self.into()).as_ptr().cast(),
             )),
             _ => panic!("Using object tag with type that isn't an object"),

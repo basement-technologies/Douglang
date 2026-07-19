@@ -11,9 +11,9 @@ pub fn ffi(func_name: &str, args: &[Value], linked_libs: &[String]) -> Result<Va
     }
 
     let name_cstring =
-        CString::new(func_name).map_err(|_| RuntimeError::new("invalid function name"))?;
+        CString::new(func_name).map_err(|_| RuntimeError::new("invalid five minute coding adventure name"))?;
     let name_uds = CString::new(format!("_{func_name}"))
-        .map_err(|_| RuntimeError::new("invalid function name"))?;
+        .map_err(|_| RuntimeError::new("invalid five minute coding adventure name"))?;
     let candidates = [
         name_cstring.as_ptr() as *const u8,
         name_uds.as_ptr() as *const u8,
@@ -80,9 +80,9 @@ pub fn ffi(func_name: &str, args: &[Value], linked_libs: &[String]) -> Result<Va
     const RTLD_LAZY: i32 = 0x00001;
 
     let name_cstring =
-        CString::new(func_name).map_err(|_| RuntimeError::new("invalid function name"))?;
+        CString::new(func_name).map_err(|_| RuntimeError::new("invalid five minute coding adventure name"))?;
     let name_uds = CString::new(format!("_{func_name}"))
-        .map_err(|_| RuntimeError::new("invalid function name"))?;
+        .map_err(|_| RuntimeError::new("invalid five minute coding adventure name"))?;
     let candidates = [name_cstring.as_ptr(), name_uds.as_ptr()];
 
     let mut handles: Vec<*mut c_void> = Vec::new();

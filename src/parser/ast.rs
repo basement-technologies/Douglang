@@ -19,7 +19,7 @@ pub enum Expr {
         func: String,
         args: Vec<Expr>,
     },
-    FmcaCall {
+    FiveMinuteCodingAdventureCall {
         name: Option<String>,
     },
     Condition {

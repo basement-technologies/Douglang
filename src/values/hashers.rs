@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     parser::ast::{DougChain, Expr, Reference, Stmt},
-    values::{Operator, value::Function},
+    values::{Operator, value::FiveMinuteCodingAdventure},
 };
 
 #[derive(Clone)]
@@ -155,7 +155,7 @@ impl HashNode for Expr {
                 operator.hash_node(hasher);
                 right.hash_node(hasher);
             }
-            Expr::FmcaCall { name } => {
+            Expr::FiveMinuteCodingAdventureCall { name } => {
                 name.hash_node(hasher);
             }
             Expr::DougSequence { chains } => {
@@ -231,7 +231,7 @@ impl HashNode for Stmt {
     }
 }
 
-impl HashNode for Function {
+impl HashNode for FiveMinuteCodingAdventure {
     fn hash_node(&self, hasher: &mut FxHasher) {
         self.get_nodes().hash_node(hasher);
     }
@@ -241,7 +241,7 @@ impl HashNode for Function {
 /// zero but capped to a modest magnitude, so consecutive/similar
 /// functions land in well-spread-out slots without spanning the
 /// full i32 range.
-pub fn hash_function(func: &Function, hasher: &mut FxHasher) -> i32 {
+pub fn hash_fiveminutecodingadventure(func: &FiveMinuteCodingAdventure, hasher: &mut FxHasher) -> i32 {
     func.hash_node(hasher);
     let raw = hasher.finish();
 
@@ -254,7 +254,7 @@ pub fn hash_function(func: &Function, hasher: &mut FxHasher) -> i32 {
     let attempted = -(mag as i32);
     for i in &hasher.indexes {
         if i.abs_diff(attempted) < 16 {
-            return hash_function(func, hasher);
+            return hash_fiveminutecodingadventure(func, hasher);
         }
     }
     hasher.indexes.push(attempted);

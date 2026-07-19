@@ -5,8 +5,8 @@ use crate::parser::ast::{DougChain, Expr, Reference, Stmt};
 use crate::runtime::RuntimeError;
 use crate::tts::Tts;
 use crate::values::tape::{Mutator, MutatorView, RuntimeTape};
-use crate::values::value::Function;
-use crate::values::{BuildFxHasher, FxHasher, Value, hash_function};
+use crate::values::value::FiveMinuteCodingAdventure;
+use crate::values::{BuildFxHasher, FxHasher, Value, hash_fiveminutecodingadventure};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -158,10 +158,10 @@ impl<'a> Interpreter<'a> {
             Ok((idx, self.current_tape_mut()))
         }
     }
-    fn run_function(&mut self, idx: i32, guard: &MutatorView) -> Result<Value, RuntimeError> {
+    fn run_fiveminutecodingadventure(&mut self, idx: i32, guard: &MutatorView) -> Result<Value, RuntimeError> {
         let block = match self.full_tape.get(idx, guard)? {
-            Value::Fmca(f) => f,
-            other => return Err(RuntimeError::NotAFunction(other.to_string())),
+            Value::FiveMinuteCodingAdventure(f) => f,
+            other => return Err(RuntimeError::NotAFiveMinuteCodingAdventure(other.to_string())),
         };
 
         self.active_tape = TapeSelection::Scoped;
@@ -200,7 +200,7 @@ impl<'a> Interpreter<'a> {
                 let (idx, tape) = self.resolve_dougs(chains, cursor)?;
                 tape.get(idx, mem)
             }
-            Expr::FmcaCall { name } => {
+            Expr::FiveMinuteCodingAdventureCall { name } => {
                 let idx = if let Some(name) = name {
                     self.adventure_names
                         .get(name)
@@ -208,7 +208,7 @@ impl<'a> Interpreter<'a> {
                 } else {
                     &self.main_tape().cursor
                 };
-                self.run_function(*idx, mem)
+                self.run_fiveminutecodingadventure(*idx, mem)
             }
             Expr::Rigged {
                 func: func_name,
@@ -328,14 +328,14 @@ impl<'a> Interpreter<'a> {
                 }
 
                 Stmt::FiveMinuteCodingAdventure { name, body } => {
-                    let function = Function::new(body.clone());
-                    let index = hash_function(&function, &mut self.hasher);
+                    let fiveminutecodingadventure = FiveMinuteCodingAdventure::new(body.clone());
+                    let index = hash_fiveminutecodingadventure(&fiveminutecodingadventure, &mut self.hasher);
 
                     self.adventure_names.insert(name.clone(), index);
                     let cursor = self.main_tape_mut().cursor;
                     self.main_tape_mut().set_cursor(index);
                     self.current_tape_mut()
-                        .set_value(guard, Value::Fmca(function))?;
+                        .set_value(guard, Value::FiveMinuteCodingAdventure(fiveminutecodingadventure))?;
                     self.main_tape_mut().set_cursor(cursor);
                 }
 
@@ -349,8 +349,8 @@ impl<'a> Interpreter<'a> {
                             .ok_or(RuntimeError::NotDefined(name.as_ref().unwrap().clone()))?
                     };
 
-                    println!("Presumed index of function: {idx}");
-                    self.run_function(*idx, guard)?;
+                    println!("Presumed index of five minute coding adventure: {idx}");
+                    self.run_fiveminutecodingadventure(*idx, guard)?;
                 }
             }
         }

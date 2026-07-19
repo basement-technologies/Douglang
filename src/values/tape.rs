@@ -27,7 +27,7 @@ use crate::{
     values::{
         Literal,
         hashers::BuildFxHasher,
-        value::{Array, Function, Nil, Text},
+        value::{Array, FiveMinuteCodingAdventure, Nil, Text},
     },
 };
 
@@ -69,7 +69,7 @@ pub enum TypeList {
     Number,
     String,
     Boolean,
-    Function,
+    FiveMinuteCodingAdventure,
     Array,
 }
 
@@ -395,7 +395,7 @@ impl Tape {
                 let text = Text::from(e.to_string());
                 self.alloc_tagged(text)?
             }
-            super::Value::Fmca(f) => self.alloc_tagged(f)?,
+            super::Value::FiveMinuteCodingAdventure(f) => self.alloc_tagged(f)?,
             super::Value::Number(n) => self.alloc_tagged(n)?,
             super::Value::Boolean(b) => self.alloc_tagged(b)?,
             super::Value::Nil => self.alloc_tagged(Nil {})?,

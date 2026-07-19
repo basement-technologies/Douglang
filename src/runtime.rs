@@ -114,8 +114,8 @@ pub enum RuntimeError {
     #[error("{0}")]
     Unexpected(String),
 
-    #[error("Attempting to call {0}, which is not a function")]
-    NotAFunction(String),
+    #[error("Attempting to call {0}, which is not a five minute coding adventure")]
+    NotAFiveMinuteCodingAdventure(String),
 }
 
 impl RuntimeError {

@@ -18,7 +18,7 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Err(RuntimeError),
-    Fmca(Function),
+    FiveMinuteCodingAdventure(FiveMinuteCodingAdventure),
     Nil,
 }
 
@@ -155,7 +155,7 @@ impl From<Value> for bool {
             Value::Number(n) => n != 0f64,
             Value::String(s) => !s.is_empty(),
             Value::Err(_) => false,
-            Value::Fmca(_) => false,
+            Value::FiveMinuteCodingAdventure(_) => false,
             Value::Nil => false,
         }
     }
@@ -167,8 +167,8 @@ impl From<crate::values::tape::Value<'_>> for Value {
             super::tape::Value::Nil => Value::Nil,
             super::tape::Value::Array(_a) => Value::Number(0f64),
             super::tape::Value::String(s) => Value::String(s.inner.clone()),
-            super::tape::Value::Function(f) => {
-                Value::Fmca(Function::new(f.get_nodes().into_iter().cloned().collect()))
+            super::tape::Value::FiveMinuteCodingAdventure(f) => {
+                Value::FiveMinuteCodingAdventure(FiveMinuteCodingAdventure::new(f.get_nodes().into_iter().cloned().collect()))
             }
             super::tape::Value::Number(n) => Value::Number(n),
             super::tape::Value::Integer(i) => Value::Number(i as f64),
@@ -183,7 +183,7 @@ impl Display for Value {
             Self::Number(v) => write!(f, "{v}"),
             Self::Boolean(v) => write!(f, "{v}"),
             Self::Err(v) => write!(f, "{v}"),
-            Self::Fmca(_) => write!(f, "<function>"),
+            Self::FiveMinuteCodingAdventure(_) => write!(f, "<fiveminutecodingadventure>"),
             Self::Nil => write!(f, "Nil"),
         }
     }
@@ -234,13 +234,13 @@ impl From<String> for Text {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct Function {
+pub struct FiveMinuteCodingAdventure {
     nodes: Box<[Stmt]>,
 }
-impl AllocObject<TypeList> for Function {
-    const TYPE_ID: TypeList = TypeList::Function;
+impl AllocObject<TypeList> for FiveMinuteCodingAdventure {
+    const TYPE_ID: TypeList = TypeList::FiveMinuteCodingAdventure;
 }
-impl Function {
+impl FiveMinuteCodingAdventure {
     pub fn get_nodes(&self) -> &[Stmt] {
         &self.nodes
     }

@@ -467,7 +467,7 @@ impl<'a> Parser<'a> {
             Ok(Token::KeyWord(KeyWord::Call)) if let Some(Token::Variable(s)) = self.peek_two() => {
                 self.consume()?;
                 self.consume()?;
-                Box::new(Expr::FmcaCall { name: Some(s) })
+                Box::new(Expr::FiveMinuteCodingAdventureCall { name: Some(s) })
             }
 
             Ok(Token::KeyWord(KeyWord::Rigged))

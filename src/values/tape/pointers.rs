@@ -178,7 +178,7 @@ impl TaggedCellPtr {
 #[derive(Clone, PartialEq)]
 pub enum Value<'guard> {
     String(ScopedPtr<'guard, Text>),
-    Function(ScopedPtr<'guard, Function>),
+    FiveMinuteCodingAdventure(ScopedPtr<'guard, FiveMinuteCodingAdventure>),
     Array(ScopedPtr<'guard, Array>),
     Number(f64),
     Integer(isize),
@@ -188,7 +188,7 @@ pub enum Value<'guard> {
 #[derive(Clone, Copy)]
 pub enum FatPtr {
     String(RawPtr<Text>),
-    Function(RawPtr<Function>),
+    FiveMinuteCodingAdventure(RawPtr<FiveMinuteCodingAdventure>),
     Array(RawPtr<Array>),
     Number(f64),
     Integer(isize),
@@ -212,8 +212,8 @@ impl FatPtr {
             FatPtr::String(raw_ptr) => {
                 Value::String(ScopedPtr::new(guard, raw_ptr.scoped_ref(guard)))
             }
-            FatPtr::Function(raw_ptr) => {
-                Value::Function(ScopedPtr::new(guard, raw_ptr.scoped_ref(guard)))
+            FatPtr::FiveMinuteCodingAdventure(raw_ptr) => {
+                Value::FiveMinuteCodingAdventure(ScopedPtr::new(guard, raw_ptr.scoped_ref(guard)))
             }
             FatPtr::Integer(num) => Value::Integer(*num),
             FatPtr::Number(num) => Value::Number(*num),
@@ -222,9 +222,9 @@ impl FatPtr {
     }
 }
 
-impl From<RawPtr<Function>> for FatPtr {
-    fn from(value: RawPtr<Function>) -> Self {
-        FatPtr::Function(value)
+impl From<RawPtr<FiveMinuteCodingAdventure>> for FatPtr {
+    fn from(value: RawPtr<FiveMinuteCodingAdventure>) -> Self {
+        FatPtr::FiveMinuteCodingAdventure(value)
     }
 }
 impl From<RawPtr<Text>> for FatPtr {
@@ -301,7 +301,7 @@ impl From<FatPtr> for TaggedPtr {
             FatPtr::Number(num) => TaggedPtr::number(num),
             FatPtr::Integer(num) => TaggedPtr::integer(num),
             FatPtr::String(raw) => TaggedPtr::object(raw.to_void()),
-            FatPtr::Function(raw) => TaggedPtr::object(raw.to_void()),
+            FatPtr::FiveMinuteCodingAdventure(raw) => TaggedPtr::object(raw.to_void()),
             FatPtr::Array(raw) => TaggedPtr::object(raw.to_void()),
             FatPtr::Nil => TaggedPtr::nil(),
         }
