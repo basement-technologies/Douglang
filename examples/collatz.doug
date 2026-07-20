@@ -6,7 +6,7 @@ loop [
   set (Doug) Rigged puts (Doug Doug)
   DougDoug +set 1 Bald set (Doug Doug) %set 2
   prediction (Doug Doug) = 0 [
-    Believers win [Doug set (Doug Doug) /set 2]
-    Doubters win [Doug set (Doug Doug) *set 3 +set 1]
+	Believers win [Doug set (Doug Doug) /set 2]
+	Doubters win [Doug set (Doug Doug) *set 3 +set 1]
   ]
 ]

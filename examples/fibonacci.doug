@@ -2,13 +2,13 @@ Doug set 1
 Doug set 1
 
 loop [
-    Bald set "Next fibonacci number is " +set (Doug) tts
-    DougDougDoug Doug set (Doug DougDoug) +set (Doug DougDougDoug Doug)
-    Bald Doug set (Doug)
-    Doug set (Doug)
+	Bald set "Next fibonacci number is " +set (Doug) tts
+	DougDougDoug Doug set (Doug DougDoug) +set (Doug DougDougDoug Doug)
+	Bald Doug set (Doug)
+	Doug set (Doug)
 
-    Bald
-    prediction (Doug) >= 100 [
-        believers win [ end stream ]
-    ]
+	Bald
+	prediction (Doug) >= 100 [
+		believers win [ end stream ]
+	]
 ]
