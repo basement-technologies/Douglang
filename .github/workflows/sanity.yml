@@ -1,0 +1,40 @@
+name: virtual sanity (jamiroquai)
+
+on:
+    push:
+        branches: [main]
+
+jobs:
+    convert:
+        runs-on: ubuntu-latest
+        if: github.actor != 'github-actions[bot]'
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Convert spaces to tabs
+              run: |
+                  TAB_WIDTH=4
+
+                  find . -type f \( \
+                    -name "*.rs" -o \
+                    -name "*.doug" -o \
+                  \) -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
+                    # unexpand converts leading spaces to tabs
+                    unexpand --first-only --tabs="$TAB_WIDTH" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+                  done
+
+            - name: Commit changes
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add -A
+                  if ! git diff --cached --quiet; then
+                    git commit -m "chore: convert spaces to tabs"
+                    git push
+                  else
+                    echo "No changes to commit."
+                  fi
