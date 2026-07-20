@@ -1,12 +1,20 @@
 Bald Doug set 27 Doug set 0
 
 loop [
-  Bald
-  prediction (Doug) = 1 [Believers win [Bald set "got to 1 in " +set (DougDoug) +set " steps" tts break]]
-  set (Doug) Rigged puts (Doug Doug)
-  DougDoug +set 1 Bald set (Doug Doug) %set 2
-  prediction (Doug Doug) = 0 [
-	Believers win [Doug set (Doug Doug) /set 2]
-	Doubters win [Doug set (Doug Doug) *set 3 +set 1]
-  ]
+	Bald
+	prediction (Doug) = 1 [
+		believers win [
+			Bald set "got to 1 in " +set (DougDoug) +set " steps" tts end stream
+		]
+	]
+	set (Doug) tts (Doug Doug)
+	DougDoug +set 1 Bald set (Doug Doug) %set 2
+	prediction (Doug Doug) = 0 [
+		believers win [
+			Doug set (Doug Doug) /set 2
+		]
+		doubters win [
+			Doug set (Doug Doug) *set 3 +set 1
+		]
+	]
 ]
