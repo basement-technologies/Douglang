@@ -21,7 +21,7 @@ jobs:
 
                   find . -type f \( \
                     -name "*.rs" -o \
-                    -name "*.doug" -o \
+                    -name "*.doug" \
                   \) -not -path "./.git/*" -print0 | while IFS= read -r -d '' file; do
                     # unexpand converts leading spaces to tabs
                     unexpand --first-only --tabs="$TAB_WIDTH" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
