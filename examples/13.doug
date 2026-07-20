@@ -1,8 +1,14 @@
 five minute coding adventure add [
+<<<<<<< HEAD
 	DougDougDoug Doug set 0
 
 	+set (Doug DougDoug) +set (DougDoug DougDougDoug)
 	guoD (Doug Doug)
+=======
+    DougDougDoug Doug set 0
+    +set (Doug DougDoug) +set (DougDoug DougDougDoug)
+    guoD (Doug Doug)
+>>>>>>> 3c54d28 (minor fixes)
 ]
 
 DougDougDoug Doug DougDoug set "6 + 7 is: "
