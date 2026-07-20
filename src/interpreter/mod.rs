@@ -26,7 +26,7 @@ enum TapeSelection {
 pub struct Interpreter<'a> {
     full_tape: RuntimeTape,
     scoped_tape: Option<RuntimeTape>,
-    tts: Arc<Tts>,
+    tts: Option<Arc<Tts>>,
     linked_libs: Vec<String>,
 
     parser: Parser<'a>,
@@ -37,7 +37,7 @@ pub struct Interpreter<'a> {
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(tts: Arc<Tts>, linked_libs: Vec<String>, parser: Parser<'a>) -> Self {
+    pub fn new(tts: Option<Arc<Tts>>, linked_libs: Vec<String>, parser: Parser<'a>) -> Self {
         let hasher = FxHasher::new();
 
         Interpreter {
@@ -288,11 +288,15 @@ impl<'a> Interpreter<'a> {
                             None => String::new(),
                         }
                     };
-                    if *overlap {
-                        self.tts.speak_overlap(&text);
+                    if let Some(tts) = &self.tts {
+                        if *overlap {
+                            tts.speak_overlap(&text);
+                        } else {
+                            tts.wait();
+                            tts.speak(&text);
+                        }
                     } else {
-                        self.tts.wait();
-                        self.tts.speak(&text);
+                        println!("{text}");
                     }
                 }
 

@@ -27,17 +27,20 @@ struct Cli {
     input: Option<String>,
     /// Compile to C source instead of interpreting. Optional output path
     /// (defaults to `<input>.c`).
-    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    #[arg(long, short = 'c', num_args = 0..=1, default_missing_value = "")]
     compile: Option<String>,
     /// Compile and link with gcc. Optional binary name (defaults to
     /// `<input>.out` / `<input>.exe`).
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     cc: Option<String>,
     /// Link additional libraries. Repeatable (`--link a --link b`) or
-    #[arg(long = "link", num_args = 1.., action = ArgAction::Append)]
+    #[arg(long = "link", short = 'l', num_args = 1.., action = ArgAction::Append)]
     link: Vec<String>,
     #[arg(long = "no-gui")]
     no_gui: bool,
+    #[arg(long = "pure", short='p')]
+    /// Run without executing any overhead (tts prints to stdout and there is no gui)
+    pure: bool,
     // --- internal helper entry points (hidden from --help) ---
     #[arg(long = "run-source-helper", hide = true, value_name = "PATH")]
     run_source_helper: Option<String>,
@@ -183,21 +186,32 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let elapsed = start.elapsed();
         eprintln!("parsed in {:.6} seconds", elapsed.as_secs_f64());
 
-        let tts = Arc::new(douglang::tts::Tts::new());
+        if cli.pure {
+            let mut interp = interpreter::Interpreter::new(None, linked_libs, parser);
 
-        let mut gui = dougterface::Dougterface::new(&tts);
-        if !cli.no_gui {
-            gui.start(&tts);
+            if let Err(e) = interp.run(&scope, input_path) {
+                eprintln!("{e}");
+                process::exit(1);
+            }
+        } else {
+            let tts = Arc::new(douglang::tts::Tts::new());
+
+            let mut gui = dougterface::Dougterface::new(&tts);
+            if !cli.no_gui {
+                gui.start(&tts);
+            }
+
+            let mut interp =
+                interpreter::Interpreter::new(Some(Arc::clone(&tts)), linked_libs, parser);
+
+            if let Err(e) = interp.run(&scope, input_path) {
+                eprintln!("{e}");
+                process::exit(1);
+            }
+
+            tts.wait();
+            gui.stop();
         }
-
-        let mut interp = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs, parser);
-        if let Err(e) = interp.run(&scope, input_path) {
-            eprintln!("{e}");
-            process::exit(1);
-        }
-
-        tts.wait();
-        gui.stop();
     }
 
     Ok(())
@@ -211,7 +225,8 @@ fn run_source_helper(path: &str, linked_libs: Vec<String>) {
     let tts = Arc::new(douglang::tts::Tts::new());
     let mut gui = dougterface::Dougterface::new(&tts);
     gui.start(&tts);
-    let mut interpreter = interpreter::Interpreter::new(Arc::clone(&tts), linked_libs, parser);
+    let mut interpreter =
+        interpreter::Interpreter::new(Some(Arc::clone(&tts)), linked_libs, parser);
 
     if let Err(e) = interpreter.run(&scope, path.to_string()) {
         eprintln!("{e}");

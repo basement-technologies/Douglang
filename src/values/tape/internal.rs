@@ -22,5 +22,3 @@ pub fn dealloc_block(ptr: BlockPtr, size: BlockSize) {
         dealloc(ptr.as_ptr(), layout);
     }
 }
-
-
