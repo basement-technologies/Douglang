@@ -279,29 +279,29 @@ impl<'a> Parser<'a> {
 						}
 					}
 =======
-                    loop {
-                        match self.consume()? {
-                            Token::KeyWord(KeyWord::Believers) => {
-                                expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-                                expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-                                believers_body = self.parse_block(false)?;
-                            }
-                            Token::KeyWord(KeyWord::Doubters) => {
-                                expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-                                expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-                                doubters_body = self.parse_block(false)?;
-                            }
-                            Token::Paren(ParenThesis::SquareRight) => break,
-                            other => {
-                                return Err(SyntaxError::Expected(
-                                    "believers, doubters, ]".to_string(),
-                                    other.to_string(),
-                                    self.row,
-                                    self.column,
-                                ));
-                            }
-                        }
-                    }
+					loop {
+						match self.consume()? {
+							Token::KeyWord(KeyWord::Believers) => {
+								expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
+								expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
+								believers_body = self.parse_block(false)?;
+							}
+							Token::KeyWord(KeyWord::Doubters) => {
+								expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
+								expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
+								doubters_body = self.parse_block(false)?;
+							}
+							Token::Paren(ParenThesis::SquareRight) => break,
+							other => {
+								return Err(SyntaxError::Expected(
+									"believers, doubters, ]".to_string(),
+									other.to_string(),
+									self.row,
+									self.column,
+								));
+							}
+						}
+					}
 >>>>>>> 3c54d28 (minor fixes)
 
 					nodes.push(Stmt::Prediction {
