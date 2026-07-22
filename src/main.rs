@@ -1,8 +1,5 @@
 use clap::{ArgAction, Parser};
-use douglang::values::tape::LiteralHeader;
-use douglang::values::tape::Mutator;
-use douglang::values::tape::MutatorView;
-use douglang::values::tape::StickyImmixHeap;
+use douglang::values::tape::Memory;
 use douglang::*;
 
 use std::env;
@@ -38,7 +35,7 @@ struct Cli {
 	link: Vec<String>,
 	#[arg(long = "no-gui")]
 	no_gui: bool,
-	#[arg(long = "pure", short='p')]
+	#[arg(long = "pure", short = 'p')]
 	/// Run without executing any overhead (tts prints to stdout and there is no gui)
 	pure: bool,
 	// --- internal helper entry points (hidden from --help) ---
@@ -97,10 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 	};
 
 	let start = Instant::now();
-
-	let heap: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
-	let scope = MutatorView::new_with(&heap);
-	let mut parser = douglang::parser::Parser::new();
+	let mem = Memory::new();
 
 	let linked_libs = cli.link;
 
@@ -110,7 +104,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 			_ => format!("{input_name}.c"),
 		};
 
-		let ast = parser.run(scope.get_data(), input_path)?;
+		let mut parser = douglang::parser::Parser::new(input_path);
+		let ast = mem.mutate(&mut parser, ())?;
 
 		let helper_path = env::current_exe()
 			.ok()
@@ -187,9 +182,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 		eprintln!("parsed in {:.6} seconds", elapsed.as_secs_f64());
 
 		if cli.pure {
-			let mut interp = interpreter::Interpreter::new(None, linked_libs, parser);
+			let mut interp = interpreter::Interpreter::new(None, linked_libs, input_path);
 
-			if let Err(e) = interp.run(&scope, input_path) {
+			if let Err(e) = mem.mutate(&mut interp, ()) {
 				eprintln!("{e}");
 				process::exit(1);
 			}
@@ -202,9 +197,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 			}
 
 			let mut interp =
-				interpreter::Interpreter::new(Some(Arc::clone(&tts)), linked_libs, parser);
+				interpreter::Interpreter::new(Some(Arc::clone(&tts)), linked_libs, input_path);
 
-			if let Err(e) = interp.run(&scope, input_path) {
+			if let Err(e) = mem.mutate(&mut interp, ()) {
 				eprintln!("{e}");
 				process::exit(1);
 			}
@@ -218,17 +213,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 fn run_source_helper(path: &str, linked_libs: Vec<String>) {
-	let heap: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
-	let scope = MutatorView::new_with(&heap);
-	let parser = douglang::parser::Parser::new();
-
 	let tts = Arc::new(douglang::tts::Tts::new());
 	let mut gui = dougterface::Dougterface::new(&tts);
 	gui.start(&tts);
-	let mut interpreter =
-		interpreter::Interpreter::new(Some(Arc::clone(&tts)), linked_libs, parser);
+	let mut interpreter = interpreter::Interpreter::new(Some(Arc::clone(&tts)), linked_libs, path);
+	let memory = Memory::new();
 
-	if let Err(e) = interpreter.run(&scope, path.to_string()) {
+	if let Err(e) = memory.mutate(&mut interpreter, ()) {
 		eprintln!("{e}");
 		process::exit(1);
 	}
@@ -269,8 +260,7 @@ fn resolve_pkg_config(libs: &[String]) -> Vec<String> {
 	for lib in libs {
 		if let Ok(output) = process::Command::new("pkg-config")
 			.args(["--libs", lib])
-			.output()
-			&& output.status.success()
+			.output() && output.status.success()
 			&& let Ok(out) = String::from_utf8(output.stdout)
 		{
 			for flag in out.split_whitespace() {

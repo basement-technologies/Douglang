@@ -1,4 +1,4 @@
-use crate::values::Operator;
+use crate::values::{Operator, tape::MutatorView};
 
 use std::{
 	fmt::{Debug, Display},
@@ -7,7 +7,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::values::tape::{ROData, TaggedCellPtr};
+use crate::values::tape::TaggedCellPtr;
 
 #[derive(Clone, Copy, Debug)]
 pub enum KeyWord {
@@ -201,7 +201,7 @@ fn merge_words(words: &[&str]) -> Box<[String]> {
 /// Creates a list of potential [`Token`]s from a [`word`] input. If there is an error parsing
 /// the next chunk as a [`Token`] then what is pushed is an [`Err`].
 #[must_use]
-fn from_word<'a>(word: &str, mutator: &'a ROData<'a>) -> Box<[Result<Token, LexerError>]> {
+fn from_word<'a>(word: &str, mutator: &MutatorView) -> Box<[Result<Token, LexerError>]> {
 	let mut res = Vec::new();
 	let mut i = 0;
 	while i < word.len() {
@@ -231,7 +231,7 @@ fn from_word<'a>(word: &str, mutator: &'a ROData<'a>) -> Box<[Result<Token, Lexe
 	}
 
 	if i == 0 {
-		if let Some(node) = ROData::alloc(mutator, word.to_string()) {
+		if let Some(node) = mutator.alloc_literal(word.to_string()) {
 			res.push(Ok(Token::Literal(node)));
 		} else {
 			res.push(Ok(Token::Variable(word.to_string())));
@@ -264,28 +264,24 @@ pub enum LexerError {
 	BinaryFile,
 }
 
-pub struct Lexer<'guard> {
+pub struct Lexer {
 	/// The buffer that the lexer reads from
 	reader: BufReader<File>,
-	/// The mutator that provides access to modify the `Tape` - Required to allocate literals into
-	/// it.
-	data: ROData<'guard>,
 	comment: bool,
 }
 
-impl<'a> Lexer<'a> {
+impl Lexer {
 	/// Creates a new [`Lexer`]
 	///
 	/// # Panics
 	/// If there is not a valid file path inputted.
 	#[must_use]
-	pub fn new(path: impl Into<String>, data: ROData<'a>) -> Lexer<'a> {
+	pub fn new(path: impl Into<String>) -> Lexer {
 		let file = File::open(path.into()).expect("There should have been a valid path inputted");
 		let reader = BufReader::new(file);
 
 		Self {
 			reader,
-			data,
 			comment: false,
 		}
 	}
@@ -321,7 +317,7 @@ impl<'a> Lexer<'a> {
 	///
 	/// # Errors
 	/// If there are no more bytes to be read, or if there is no closing brace.
-	pub fn lex_block(&mut self) -> Result<Box<[Token]>, LexerError> {
+	pub fn lex_block(&mut self, mutator: &MutatorView) -> Result<Box<[Token]>, LexerError> {
 		let mut block = Vec::new();
 		self.reader
 			.read_until(b']', &mut block)
@@ -335,10 +331,9 @@ impl<'a> Lexer<'a> {
 			})?;
 		let words = String::from_utf8(block).map_err(|_| LexerError::BinaryFile)?;
 		let words = self.strip_comments(&words);
-		let data = &mut self.data;
 		merge_words(&words.split_whitespace().collect::<Box<[_]>>())
 			.iter()
-			.flat_map(|w| from_word(w, data))
+			.flat_map(|w| from_word(w, mutator))
 			.collect()
 	}
 
@@ -349,7 +344,7 @@ impl<'a> Lexer<'a> {
 	///
 	/// # Errors
 	/// If there are no more bytes.
-	pub fn lex_line(&mut self) -> Result<Box<[Token]>, LexerError> {
+	pub fn lex_line(&mut self, mutator: &MutatorView) -> Result<Box<[Token]>, LexerError> {
 		loop {
 			let line = &mut String::new();
 			let bytes = self
@@ -369,10 +364,8 @@ impl<'a> Lexer<'a> {
 				print!("Token: {token}  ");
 			}
 
-			let result: Result<Box<[Token]>, LexerError> = tokens
-				.iter()
-				.flat_map(|w| from_word(w, &self.data))
-				.collect();
+			let result: Result<Box<[Token]>, LexerError> =
+				tokens.iter().flat_map(|w| from_word(w, &mutator)).collect();
 
 			let tokens = result?;
 			if !tokens.is_empty() {

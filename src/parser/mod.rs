@@ -2,7 +2,7 @@ pub mod ast;
 mod error;
 pub mod lexer;
 
-use lexer::{Lexer, LexerError};
+use lexer::Lexer;
 use std::collections::VecDeque;
 
 pub use error::SyntaxError;
@@ -11,12 +11,12 @@ use crate::parser::ast::{DougChain, Reference};
 use crate::parser::lexer::{KeyWord, ParenThesis, Token};
 use crate::runtime::RuntimeError;
 use crate::values::Operator;
-use crate::values::tape::{Mutator, ROData};
+use crate::values::tape::{Mutator, MutatorView};
 use ast::{Expr, Stmt};
 
 macro_rules! expect_token {
-	($self:expr, $pat:pat, $expected:literal) => {
-		match $self.consume()? {
+	($self:expr, $mem:expr, $pat:pat, $expected:literal) => {
+		match $self.consume($mem)? {
 			$pat => (),
 			other => {
 				return Err(SyntaxError::Expected(
@@ -29,8 +29,8 @@ macro_rules! expect_token {
 		}
 	};
 
-	($self:expr, $pat:pat, $expected:literal, $output:expr) => {
-		match $self.consume()? {
+	($self:expr, $mem:expr, $pat:pat, $expected:literal, $output:expr) => {
+		match $self.consume(mem)? {
 			$pat => $output,
 			other => {
 				return Err(SyntaxError::Expected(
@@ -44,37 +44,34 @@ macro_rules! expect_token {
 	};
 }
 
-pub struct Parser<'a> {
-	lexer: Option<Lexer<'a>>,
+pub struct Parser {
+	lexer: Lexer,
 	tokens: VecDeque<Token>,
 	column: u16,
 	row: u16,
 }
 
-impl<'a> Mutator<'a> for Parser<'a> {
-	type Scope = ROData<'a>;
-	type Input = String;
+impl Mutator for Parser {
+	type Input = ();
 	type Output = Box<[Stmt]>;
 
 	fn run(
 		&mut self,
-		mem: &'a Self::Scope,
-		input: Self::Input,
+		mem: &MutatorView,
+		_input: Self::Input,
 	) -> Result<Self::Output, crate::runtime::RuntimeError> {
-		self.lexer = Some(Lexer::new(input, mem.clone()));
-
-		self.parse()
+		self.parse(mem)
 			.map_err(|e| RuntimeError::SyntaxError(e.to_string()))
 	}
 }
 
-impl<'a> Parser<'a> {
+impl Parser {
 	#[must_use]
-	pub fn new() -> Self {
+	pub fn new(path: impl Into<String>) -> Self {
 		Self {
 			column: 0,
 			row: 0,
-			lexer: None,
+			lexer: Lexer::new(path),
 			tokens: VecDeque::new(),
 		}
 	}
@@ -86,14 +83,15 @@ impl<'a> Parser<'a> {
 	///
 	/// # Errors
 	/// If there are no more tokens, or if we cannot add more lines.
+	#[inline]
 	#[allow(clippy::let_and_return)]
-	fn consume(&mut self) -> Result<Token, SyntaxError> {
+	fn consume(&mut self, mem: &MutatorView) -> Result<Token, SyntaxError> {
 		self.column += 1;
 
 		while self.tokens.is_empty() {
 			self.row += 1;
 			self.column = 0;
-			self.add_line()?
+			self.add_line(mem)?
 		}
 
 		let t = self
@@ -114,6 +112,7 @@ impl<'a> Parser<'a> {
 	/// Because this doesn't mutate [`self`], this function errors when there are no more tokens
 	/// left. This is good for separating out things that are dependent on lines.
 	#[allow(clippy::let_and_return)]
+	#[inline]
 	fn peek(&self) -> Result<Token, SyntaxError> {
 		let t = self
 			.tokens
@@ -128,6 +127,7 @@ impl<'a> Parser<'a> {
 	}
 
 	#[allow(unused)]
+	#[inline]
 	fn peek_two(&self) -> Option<Token> {
 		self.tokens.get(1).cloned()
 	}
@@ -140,16 +140,11 @@ impl<'a> Parser<'a> {
 	/// # Errors
 	/// This fnction only errors out if there is a [`LexerError`], something that should always be
 	/// [`LexerError::EOFReached`] or if there is a [`LexerError::InvalidToken`].
-	fn add_line(&mut self) -> Result<(), SyntaxError> {
+	#[inline]
+	fn add_line(&mut self, mem: &MutatorView) -> Result<(), SyntaxError> {
 		let tokens = self
 			.lexer
-			.as_mut()
-			.ok_or(SyntaxError::Lexer(
-				LexerError::EOFReached,
-				self.row,
-				self.column,
-			))?
-			.lex_line()
+			.lex_line(mem)
 			.map_err(|e| SyntaxError::Lexer(e, self.row, self.column))?;
 		let tokens: &mut VecDeque<_> = &mut tokens.into_vec().into();
 		self.tokens.append(tokens);
@@ -160,8 +155,9 @@ impl<'a> Parser<'a> {
 	///
 	/// # Errors
 	/// If the `[Self::parse_block]` beneath it fails.
-	pub fn parse(&mut self) -> Result<Box<[Stmt]>, SyntaxError> {
-		self.parse_block(true)
+	#[inline]
+	pub fn parse(&mut self, mem: &MutatorView) -> Result<Box<[Stmt]>, SyntaxError> {
+		self.parse_block(true, mem)
 	}
 
 	/// Parses a block of nodes. This function takes the [`Token`] inputs from the [`Parser::Lexer`]
@@ -169,15 +165,15 @@ impl<'a> Parser<'a> {
 	/// ([`SyntaxError::NoMoreTokens`])[run out of tokens] or we hit another [`SyntaxError`]. This
 	/// exits cleanly if we have no more tokens to consume, and don't expect any, and exit on a `]`
 	/// or nothing depending on whether this is the top level or not.
-	fn parse_block(&mut self, is_top: bool) -> Result<Box<[Stmt]>, SyntaxError> {
+	fn parse_block(&mut self, is_top: bool, mem: &MutatorView) -> Result<Box<[Stmt]>, SyntaxError> {
 		let mut nodes = Vec::new();
 		self.row += 1;
 		self.column = 0;
 
-		while let Ok(token) = self.consume() {
+		while let Ok(token) = self.consume(mem) {
 			match token {
 				Token::KeyWord(KeyWord::Tts | KeyWord::Ttss) => {
-					if let Ok(msg) = self.parse_expr() {
+					if let Ok(msg) = self.parse_expr(mem) {
 						nodes.push(Stmt::Tts {
 							msg: Some(msg),
 							use_index: false,
@@ -192,7 +188,7 @@ impl<'a> Parser<'a> {
 					}
 				}
 				Token::KeyWord(KeyWord::Guod) => {
-					if let Ok(value) = self.parse_expr() {
+					if let Ok(value) = self.parse_expr(mem) {
 						nodes.push(Stmt::Guod {
 							value: Some(value),
 							use_index: false,
@@ -205,7 +201,7 @@ impl<'a> Parser<'a> {
 					}
 				}
 				Token::KeyWord(KeyWord::Call) => {
-					if let Ok(index) = self.parse_expr()
+					if let Ok(index) = self.parse_expr(mem)
 						&& let Expr::Variable(name) = index
 					{
 						nodes.push(Stmt::Call {
@@ -221,9 +217,9 @@ impl<'a> Parser<'a> {
 				}
 
 				Token::KeyWord(KeyWord::Rigged) => {
-					if let Ok(Token::Variable(v)) = self.consume() {
+					if let Ok(Token::Variable(v)) = self.consume(mem) {
 						let mut args: Vec<Expr> = Vec::new();
-						while let Ok(expr) = self.parse_expr() {
+						while let Ok(expr) = self.parse_expr(mem) {
 							args.push(expr);
 						}
 						nodes.push(Stmt::Expr(Expr::Rigged { func: v, args }))
@@ -231,65 +227,50 @@ impl<'a> Parser<'a> {
 				}
 				Token::KeyWord(KeyWord::Set) => {
 					nodes.push(Stmt::Set {
-						value: self.parse_expr()?,
+						value: self.parse_expr(mem)?,
 						oper: None,
 					});
 				}
 				Token::Operator(op) => {
-					let (value, _) = self.parse_set_expr()?;
+					let (value, _) = self.parse_set_expr(mem)?;
 					nodes.push(Stmt::Set {
 						value,
 						oper: Some(op),
 					});
 				}
 				Token::KeyWord(KeyWord::Loop) => {
-					expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-					let body = self.parse_block(false)?;
+					expect_token!(self, mem, Token::Paren(ParenThesis::SquareLeft), "[");
+					let body = self.parse_block(false, mem)?;
 					nodes.push(Stmt::Loop { body });
 				}
 				Token::KeyWord(KeyWord::Prediction) => {
-					let condition = self.parse_expr()?;
-					expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
+					let condition = self.parse_expr(mem)?;
+					expect_token!(self, mem, Token::Paren(ParenThesis::SquareLeft), "[");
 
 					let mut believers_body: Box<[Stmt]> = Vec::new().into();
 					let mut doubters_body: Box<[Stmt]> = Vec::new().into();
 
-<<<<<<< HEAD
 					loop {
-						match self.consume()? {
+						match self.consume(mem)? {
 							Token::KeyWord(KeyWord::Believers) => {
-								expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-								expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-								believers_body = self.parse_block(false)?;
+								expect_token!(self, mem, Token::KeyWord(KeyWord::Wins), "win");
+								expect_token!(
+									self,
+									mem,
+									Token::Paren(ParenThesis::SquareLeft),
+									"["
+								);
+								believers_body = self.parse_block(false, mem)?;
 							}
 							Token::KeyWord(KeyWord::Doubters) => {
-								expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-								expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-								doubters_body = self.parse_block(false)?;
-							}
-							Token::Paren(ParenThesis::SquareRight) => break,
-							other => {
-								return Err(SyntaxError::Expected(
-									"Believers, Doubters, ]".to_string(),
-									other.to_string(),
-									self.row,
-									self.column,
-								));
-							}
-						}
-					}
-=======
-					loop {
-						match self.consume()? {
-							Token::KeyWord(KeyWord::Believers) => {
-								expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-								expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-								believers_body = self.parse_block(false)?;
-							}
-							Token::KeyWord(KeyWord::Doubters) => {
-								expect_token!(self, Token::KeyWord(KeyWord::Wins), "win");
-								expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-								doubters_body = self.parse_block(false)?;
+								expect_token!(self, mem, Token::KeyWord(KeyWord::Wins), "win");
+								expect_token!(
+									self,
+									mem,
+									Token::Paren(ParenThesis::SquareLeft),
+									"["
+								);
+								doubters_body = self.parse_block(false, mem)?;
 							}
 							Token::Paren(ParenThesis::SquareRight) => break,
 							other => {
@@ -302,7 +283,6 @@ impl<'a> Parser<'a> {
 							}
 						}
 					}
->>>>>>> 3c54d28 (minor fixes)
 
 					nodes.push(Stmt::Prediction {
 						believe_body: believers_body,
@@ -311,7 +291,7 @@ impl<'a> Parser<'a> {
 					});
 				}
 				Token::KeyWord(KeyWord::FiveMinuteCodingAdventure) => {
-					let Token::Variable(name) = self.consume()? else {
+					let Token::Variable(name) = self.consume(mem)? else {
 						return Err(SyntaxError::Expected(
 							"variable name".to_string(),
 							"another".to_string(),
@@ -320,16 +300,16 @@ impl<'a> Parser<'a> {
 						));
 					};
 
-					expect_token!(self, Token::Paren(ParenThesis::SquareLeft), "[");
-					let body = self.parse_block(false)?;
+					expect_token!(self, mem, Token::Paren(ParenThesis::SquareLeft), "[");
+					let body = self.parse_block(false, mem)?;
 					nodes.push(Stmt::FiveMinuteCodingAdventure { name, body })
 				}
 
 				Token::KeyWord(KeyWord::Bald | KeyWord::DougChain { .. }) | Token::Variable(_) => {
-					nodes.push(self.parse_doug_node(&token)?);
+					nodes.push(self.parse_doug_node(&token, mem)?);
 
 					while let Ok(Token::KeyWord(KeyWord::Set) | Token::Operator(_)) = self.peek() {
-						let (value, op) = self.parse_set_expr()?;
+						let (value, op) = self.parse_set_expr(mem)?;
 						nodes.push(Stmt::Set { value, oper: op });
 					}
 				}
@@ -337,8 +317,8 @@ impl<'a> Parser<'a> {
 					nodes.push(Stmt::EndStream);
 				}
 				Token::Paren(ParenThesis::Left) => {
-					let chains = self.parse_doug_expr()?;
-					expect_token!(self, Token::Paren(ParenThesis::Right), ")");
+					let chains = self.parse_doug_expr(mem)?;
+					expect_token!(self, mem, Token::Paren(ParenThesis::Right), ")");
 					nodes.push(Stmt::Doug {
 						chains,
 						reset: true,
@@ -377,7 +357,7 @@ impl<'a> Parser<'a> {
 		Ok(nodes.into())
 	}
 
-	fn parse_doug_node(&mut self, token: &Token) -> Result<Stmt, SyntaxError> {
+	fn parse_doug_node(&mut self, token: &Token, mem: &MutatorView) -> Result<Stmt, SyntaxError> {
 		let (mut chains, reset) = match token {
 			Token::KeyWord(KeyWord::Bald) => (Vec::new(), true),
 			Token::KeyWord(KeyWord::DougChain(count)) => {
@@ -395,7 +375,7 @@ impl<'a> Parser<'a> {
 		};
 
 		while let Ok(Token::KeyWord(KeyWord::DougChain(count))) = self.peek() {
-			self.consume()?;
+			self.consume(mem)?;
 			chains.push(Reference::Doug(DougChain { count }));
 		}
 
@@ -403,15 +383,18 @@ impl<'a> Parser<'a> {
 		Ok(Stmt::Doug { chains, reset })
 	}
 
-	fn parse_set_expr(&mut self) -> Result<(Expr, Option<Operator>), SyntaxError> {
-		match self.consume()? {
+	fn parse_set_expr(
+		&mut self,
+		mem: &MutatorView,
+	) -> Result<(Expr, Option<Operator>), SyntaxError> {
+		match self.consume(mem)? {
 			Token::KeyWord(KeyWord::Set) => {
-				let value = self.parse_expr()?;
+				let value = self.parse_expr(mem)?;
 				Ok((value, None))
 			}
-			Token::Operator(op) => match self.consume()? {
+			Token::Operator(op) => match self.consume(mem)? {
 				Token::KeyWord(KeyWord::Set) => {
-					let value = self.parse_expr()?;
+					let value = self.parse_expr(mem)?;
 					Ok((value, Some(op)))
 				}
 				other => Err(SyntaxError::Expected(
@@ -430,19 +413,19 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	fn parse_doug_expr(&mut self) -> Result<Box<[Reference]>, SyntaxError> {
+	fn parse_doug_expr(&mut self, mem: &MutatorView) -> Result<Box<[Reference]>, SyntaxError> {
 		let mut dougs = Vec::new();
 		while let Ok(token) = self.peek() {
 			match token {
 				Token::KeyWord(KeyWord::DougChain(count)) => {
-					self.consume()?;
+					self.consume(mem)?;
 					dougs.push(Reference::Doug(DougChain { count }));
 				}
 				Token::Paren(ParenThesis::Right | ParenThesis::AngleRight) => {
 					return Ok(dougs.into());
 				}
 				Token::Variable(v) => {
-					self.consume()?;
+					self.consume(mem)?;
 					dougs.push(Reference::Variable(v));
 				}
 				_ => {
@@ -459,22 +442,22 @@ impl<'a> Parser<'a> {
 		Ok(dougs.into())
 	}
 
-	fn tokens_to_expr(&mut self) -> Result<Box<Expr>, SyntaxError> {
+	fn tokens_to_expr(&mut self, mem: &MutatorView) -> Result<Box<Expr>, SyntaxError> {
 		let expr = match self.peek() {
 			Ok(Token::Paren(ParenThesis::Left)) => {
-				self.consume()?;
-				let expr = self.parse_expr()?;
-				expect_token!(self, Token::Paren(ParenThesis::Right), ")");
+				self.consume(mem)?;
+				let expr = self.parse_expr(mem)?;
+				expect_token!(self, mem, Token::Paren(ParenThesis::Right), ")");
 
 				Box::new(expr)
 			}
 			Ok(Token::Literal(lit)) => {
-				self.consume()?;
+				self.consume(mem)?;
 				Box::new(Expr::Literal(lit))
 			}
 			Ok(Token::KeyWord(KeyWord::DougChain(_)) | Token::KeyWord(KeyWord::Bald)) => {
 				Box::new(Expr::DougSequence {
-					chains: self.parse_doug_expr()?,
+					chains: self.parse_doug_expr(mem)?,
 				})
 			}
 
@@ -482,27 +465,27 @@ impl<'a> Parser<'a> {
 				if let Some(Token::KeyWord(KeyWord::DougChain(_))) = self.peek_two() =>
 			{
 				Box::new(Expr::DougSequence {
-					chains: self.parse_doug_expr()?,
+					chains: self.parse_doug_expr(mem)?,
 				})
 			}
 			Ok(Token::Variable(v)) => {
-				self.consume()?;
+				self.consume(mem)?;
 				Box::new(Expr::Variable(v))
 			}
 
 			Ok(Token::KeyWord(KeyWord::Call)) if let Some(Token::Variable(s)) = self.peek_two() => {
-				self.consume()?;
-				self.consume()?;
+				self.consume(mem)?;
+				self.consume(mem)?;
 				Box::new(Expr::FiveMinuteCodingAdventureCall { name: Some(s) })
 			}
 
 			Ok(Token::KeyWord(KeyWord::Rigged))
 				if let Some(Token::Variable(v)) = self.peek_two() =>
 			{
-				self.consume()?;
-				self.consume()?;
+				self.consume(mem)?;
+				self.consume(mem)?;
 				let mut args: Vec<Expr> = Vec::new();
-				while let Ok(expr) = self.parse_expr() {
+				while let Ok(expr) = self.parse_expr(mem) {
 					args.push(expr);
 				}
 				Box::new(Expr::Rigged { func: v, args })
@@ -525,15 +508,15 @@ impl<'a> Parser<'a> {
 		Ok(expr)
 	}
 
-	fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
-		let left = self.tokens_to_expr()?;
+	fn parse_expr(&mut self, mem: &MutatorView) -> Result<Expr, SyntaxError> {
+		let left = self.tokens_to_expr(mem)?;
 
 		let op = match self.peek() {
 			Ok(Token::Operator(op)) => {
 				if let Some(Token::KeyWord(KeyWord::Set)) = self.peek_two() {
 					None
 				} else {
-					self.consume()?;
+					self.consume(mem)?;
 					Some(op)
 				}
 			}
@@ -544,18 +527,12 @@ impl<'a> Parser<'a> {
 			return Ok(*left);
 		};
 
-		let right = self.tokens_to_expr().ok();
+		let right = self.tokens_to_expr(mem).ok();
 
 		Ok(Expr::Condition {
 			left,
 			operator: Some(op),
 			right,
 		})
-	}
-}
-
-impl<'a> Default for Parser<'a> {
-	fn default() -> Self {
-		Self::new()
 	}
 }

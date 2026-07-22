@@ -4,7 +4,7 @@ use crate::parser::Parser;
 use crate::parser::ast::{DougChain, Expr, Reference, Stmt};
 use crate::runtime::RuntimeError;
 use crate::tts::Tts;
-use crate::values::tape::{Mutator, MutatorView, RuntimeTape};
+use crate::values::tape::{Mutator, MutatorView, RuntimeTape, TaggedScopedPtr};
 use crate::values::value::FiveMinuteCodingAdventure;
 use crate::values::{BuildFxHasher, FxHasher, Value, hash_fiveminutecodingadventure};
 use std::collections::HashMap;
@@ -23,22 +23,23 @@ enum TapeSelection {
 	Main,
 }
 
-pub struct Interpreter<'a> {
+pub struct Interpreter {
 	full_tape: RuntimeTape,
 	scoped_tape: Option<RuntimeTape>,
 	tts: Option<Arc<Tts>>,
 	linked_libs: Vec<String>,
 
-	parser: Parser<'a>,
+	parser: Parser,
 	hasher: FxHasher,
 	adventure_names: HashMap<String, i32, BuildFxHasher>,
 	active_tape: TapeSelection,
 	top_level: bool,
 }
 
-impl<'a> Interpreter<'a> {
-	pub fn new(tts: Option<Arc<Tts>>, linked_libs: Vec<String>, parser: Parser<'a>) -> Self {
+impl Interpreter {
+	pub fn new(tts: Option<Arc<Tts>>, linked_libs: Vec<String>, file: impl Into<String>) -> Self {
 		let hasher = FxHasher::new();
+		let parser = Parser::new(file);
 
 		Interpreter {
 			full_tape: RuntimeTape::new(),
@@ -55,15 +56,20 @@ impl<'a> Interpreter<'a> {
 
 	#[allow(unused)]
 	#[inline]
-	pub fn print_state(&self) {
-		for (i, v) in self
-			.current_tape()
-			.get_values(Some(self.current_tape().cursor))
-		{
-			println!("{} {:?}", i, v);
-		}
+	pub fn print_state(&self, guard: &MutatorView) {
+		self.current_tape()
+			.get_values(match self.active_tape {
+				TapeSelection::Main => None,
+				_ => Some(self.current_tape().cursor),
+			})
+			.iter()
+			.map(|(idx, ptr)| -> (&u32, Value) {
+				(idx, TaggedScopedPtr::new(guard, **ptr).get_value().into())
+			})
+			.for_each(|(idx, val)| println!("{} {:?}", idx, val));
 	}
 
+	#[inline]
 	fn current_tape(&self) -> &RuntimeTape {
 		match self.active_tape {
 			TapeSelection::Scoped => self.scoped_tape.as_ref().unwrap_or(&self.full_tape),
@@ -71,6 +77,7 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
+	#[inline]
 	fn current_tape_mut(&mut self) -> &mut RuntimeTape {
 		match self.active_tape {
 			TapeSelection::Scoped => self.scoped_tape.as_mut().unwrap_or(&mut self.full_tape),
@@ -78,10 +85,12 @@ impl<'a> Interpreter<'a> {
 		}
 	}
 
+	#[inline]
 	fn main_tape(&self) -> &RuntimeTape {
 		&self.full_tape
 	}
 
+	#[inline]
 	fn main_tape_mut(&mut self) -> &mut RuntimeTape {
 		&mut self.full_tape
 	}
@@ -160,10 +169,18 @@ impl<'a> Interpreter<'a> {
 			Ok((idx, self.current_tape_mut()))
 		}
 	}
-	fn run_fiveminutecodingadventure(&mut self, idx: i32, guard: &MutatorView) -> Result<Value, RuntimeError> {
+	fn run_fiveminutecodingadventure(
+		&mut self,
+		idx: i32,
+		guard: &MutatorView,
+	) -> Result<Value, RuntimeError> {
 		let block = match self.full_tape.get(idx, guard)? {
 			Value::FiveMinuteCodingAdventure(f) => f,
-			other => return Err(RuntimeError::NotAFiveMinuteCodingAdventure(other.to_string())),
+			other => {
+				return Err(RuntimeError::NotAFiveMinuteCodingAdventure(
+					other.to_string(),
+				));
+			}
 		};
 
 		let is_top_level = self.top_level;
@@ -171,7 +188,11 @@ impl<'a> Interpreter<'a> {
 		let new_tape = if is_top_level {
 			self.full_tape.clone().clone_into(idx, 16)
 		} else {
-			previous_tape.as_ref().unwrap_or(&self.full_tape).clone().clone_into(idx, 16)
+			previous_tape
+				.as_ref()
+				.unwrap_or(&self.full_tape)
+				.clone()
+				.clone_into(idx, 16)
 		};
 
 		self.active_tape = TapeSelection::Scoped;
@@ -186,7 +207,11 @@ impl<'a> Interpreter<'a> {
 
 		self.scoped_tape = previous_tape;
 		self.top_level = is_top_level;
-		self.active_tape = if is_top_level { TapeSelection::Main } else { TapeSelection::Scoped };
+		self.active_tape = if is_top_level {
+			TapeSelection::Main
+		} else {
+			TapeSelection::Scoped
+		};
 		result
 	}
 
@@ -254,7 +279,7 @@ impl<'a> Interpreter<'a> {
 		for node in nodes {
 			#[cfg(debug_assertions)]
 			{
-				self.print_state();
+				self.print_state(guard);
 				println!("{node:?}");
 			}
 			match node {
@@ -343,13 +368,18 @@ impl<'a> Interpreter<'a> {
 
 				Stmt::FiveMinuteCodingAdventure { name, body } => {
 					let fiveminutecodingadventure = FiveMinuteCodingAdventure::new(body.clone());
-					let index = hash_fiveminutecodingadventure(&fiveminutecodingadventure, &mut self.hasher);
+					let index = hash_fiveminutecodingadventure(
+						&fiveminutecodingadventure,
+						&mut self.hasher,
+					);
 
 					self.adventure_names.insert(name.clone(), index);
 					let cursor = self.main_tape_mut().cursor;
 					self.main_tape_mut().set_cursor(index);
-					self.current_tape_mut()
-						.set_value(guard, Value::FiveMinuteCodingAdventure(fiveminutecodingadventure))?;
+					self.current_tape_mut().set_value(
+						guard,
+						Value::FiveMinuteCodingAdventure(fiveminutecodingadventure),
+					)?;
 					self.main_tape_mut().set_cursor(cursor);
 				}
 
@@ -372,17 +402,16 @@ impl<'a> Interpreter<'a> {
 	}
 }
 
-impl<'a> Mutator<'a> for Interpreter<'a> {
-	type Input = String;
+impl Mutator for Interpreter {
+	type Input = ();
 	type Output = ();
-	type Scope = MutatorView<'a>;
 
 	fn run(
 		&mut self,
-		mem: &'a Self::Scope,
-		input: Self::Input,
+		mem: &MutatorView,
+		_input: Self::Input,
 	) -> Result<Self::Output, RuntimeError> {
-		match self.parser.run(mem.get_data(), input) {
+		match self.parser.run(mem, ()) {
 			Ok(nodes) => {
 				self.process(&nodes, mem)?;
 			}

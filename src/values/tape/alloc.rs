@@ -39,34 +39,13 @@ pub trait AllocHeader: Sized {
 	/// Create a new header for an array type
 	fn new_array(size: ArraySize, size_class: SizeClass, mark: Mark) -> Self;
 
-	/*
-	/// Set the Mark value to "marked"
-	fn mark(&mut self);
-
-	/// Get the current Mark value
-	fn is_marked(&self) -> bool;
-
 	/// Get the size class of the object
 	fn size_class(&self) -> SizeClass;
 
 	/// Get the size of the object in bytes
 	fn size(&self) -> u32;
-	*/
 
 	/// Get the type of the object
 	fn type_id(&self) -> Self::TypeId;
 }
 
-pub trait MutatorScope {}
-
-pub trait Mutator<'a>: Sized {
-	type Input;
-	type Output;
-	type Scope: MutatorScope;
-
-	fn run(
-		&mut self,
-		mem: &'a Self::Scope,
-		input: Self::Input,
-	) -> Result<Self::Output, RuntimeError>;
-}

@@ -94,7 +94,7 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::{lexer, parser};
+	use crate::{parser};
 
 	fn compile_src(source: &str) -> String {
 		let ast = parser::parse(&lexer::lex(source).unwrap()).unwrap();

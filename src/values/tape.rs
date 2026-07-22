@@ -7,8 +7,10 @@ mod pointers;
 
 pub use alloc::*;
 use block::*;
-pub use bump::StickyImmixHeap;
+use bump::StickyImmixHeap;
 pub use pointers::*;
+
+type HeapStorage = StickyImmixHeap<TypeHeader>;
 
 use std::{
 	cell::{Cell, UnsafeCell},
@@ -75,7 +77,6 @@ pub enum TypeList {
 
 impl AllocTypeId for TypeList {}
 
-#[allow(dead_code)]
 struct TypeHeader {
 	size: u32,
 	mark: Mark,
@@ -107,6 +108,14 @@ impl AllocHeader for TypeHeader {
 	fn type_id(&self) -> Self::TypeId {
 		self.type_id
 	}
+
+	fn size(&self) -> u32 {
+		self.size
+	}
+
+	fn size_class(&self) -> SizeClass {
+		self.size_class
+	}
 }
 
 /// This enum defines an implementor of the [`AllocTypeId`] trait to be used when allocating memory
@@ -126,16 +135,6 @@ pub struct LiteralHeader {
 	mark: Mark,
 	type_id: LiteralList,
 	size_class: SizeClass,
-}
-
-pub struct ROData<'mem> {
-	heap: &'mem StickyImmixHeap<LiteralHeader>,
-}
-
-impl Clone for ROData<'_> {
-	fn clone(&self) -> Self {
-		Self { heap: self.heap }
-	}
 }
 
 impl AllocTypeId for LiteralList {}
@@ -182,16 +181,159 @@ impl AllocHeader for LiteralHeader {
 	fn type_id(&self) -> Self::TypeId {
 		self.type_id
 	}
+
+	fn size(&self) -> u32 {
+		self.size
+	}
+
+	fn size_class(&self) -> SizeClass {
+		self.size_class
+	}
 }
 
-impl MutatorScope for ROData<'_> {}
+struct Tape {
+	literals: StickyImmixHeap<LiteralHeader>,
+	heap: HeapStorage,
+}
 
-impl<'mem> ROData<'mem> {
+impl Tape {
+	#[must_use]
+	fn new() -> Self {
+		let heap: HeapStorage = StickyImmixHeap::new();
+		let literals: StickyImmixHeap<LiteralHeader> = StickyImmixHeap::new();
+		Self { literals, heap }
+	}
+
+	#[inline]
+	fn alloc<T>(&self, object: T) -> Result<RawPtr<T>, RuntimeError>
+	where
+		T: AllocObject<TypeList>,
+	{
+		Ok(self.heap.alloc(object)?)
+	}
+
+	#[inline]
+	fn alloc_tagged<T>(&self, object: T) -> Result<TaggedPtr, RuntimeError>
+	where
+		FatPtr: From<RawPtr<T>>,
+		T: AllocObject<TypeList>,
+	{
+		Ok(TaggedPtr::from(FatPtr::from(self.alloc(object)?)))
+	}
+
+	pub fn get_value(
+		&self,
+		idx: ArraySize,
+		guard: &MutatorView,
+		map: &TapeMap,
+	) -> Option<super::Value> {
+		let ptr = map.get(&idx)?;
+		let value = TaggedScopedPtr::new(guard, *ptr).get_value().into();
+		Some(value)
+	}
+
+	pub fn upsert_value(
+		&self,
+		idx: ArraySize,
+		value: super::Value,
+		map: &mut TapeMap,
+	) -> Result<(), RuntimeError> {
+		let ptr: TaggedPtr = match value {
+			super::Value::String(s) => {
+				let text = Text::from(s);
+				self.alloc_tagged(text)?
+			}
+			super::Value::Err(e) => {
+				let text = Text::from(e.to_string());
+				self.alloc_tagged(text)?
+			}
+			super::Value::FiveMinuteCodingAdventure(f) => self.alloc_tagged(f)?,
+			super::Value::Number(n) => self.alloc_tagged(n)?,
+			super::Value::Boolean(b) => self.alloc_tagged(b)?,
+			super::Value::Nil => self.alloc_tagged(Nil {})?,
+		};
+
+		if let Some(val) = map.get_mut(&idx) {
+			*val = ptr;
+		} else {
+			map.insert(idx, ptr);
+		}
+
+		Ok(())
+	}
+}
+
+impl From<AllocError> for RuntimeError {
+	fn from(value: AllocError) -> Self {
+		RuntimeError::AllocError(value.to_string())
+	}
+}
+
+pub struct Memory {
+	tape: Tape,
+}
+
+impl Memory {
+	pub fn new() -> Self {
+		Self { tape: Tape::new() }
+	}
+
+	pub fn mutate<M: Mutator>(
+		&self,
+		m: &mut M,
+		input: M::Input,
+	) -> Result<M::Output, RuntimeError> {
+		let guard = MutatorView::new(self);
+		m.run(&guard, input)
+	}
+}
+
+impl Default for Memory {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+pub struct MutatorView<'memory> {
+	tape: &'memory Tape,
+}
+
+pub trait MutatorScope {}
+
+pub trait Mutator: Sized {
+	type Input;
+	type Output;
+
+	fn run(&mut self, mem: &MutatorView, input: Self::Input) -> Result<Self::Output, RuntimeError>;
+}
+
+impl MutatorScope for MutatorView<'_> {}
+
+impl<'memory> MutatorView<'memory> {
+	pub fn alloc<T>(&self, object: T) -> Result<ScopedPtr<'_, T>, RuntimeError>
+	where
+		T: AllocObject<TypeList>,
+	{
+		Ok(ScopedPtr::new(
+			self,
+			self.tape.alloc(object)?.scoped_ref(self),
+		))
+	}
+
+	pub fn alloc_tagged<T>(&self, object: T) -> Result<TaggedScopedPtr<'_>, RuntimeError>
+	where
+		T: AllocObject<TypeList>,
+		FatPtr: From<RawPtr<T>>,
+	{
+		let raw = self.tape.alloc_tagged(object)?;
+		Ok(TaggedScopedPtr::new(self, raw))
+	}
+
 	/// Parse this `token` into a literal or return `None`.
 	///
 	/// This function allocates space in [`Self::heap`] for a [`TaggedCellPtr`] pointing to the
 	/// parsed token if successful, or else nothing is allocated and [`None`] is returned.
-	pub fn alloc(&'mem self, token: String) -> Option<TaggedCellPtr> {
+	pub fn alloc_literal(&'memory self, token: String) -> Option<TaggedCellPtr> {
 		let token = if token.chars().nth(0) == Some('\"') {
 			let rest = &token[1..];
 			let j = rest.find('"')?;
@@ -215,24 +357,30 @@ impl<'mem> ROData<'mem> {
 		};
 
 		match literal {
-			Literal::Number(n) => {
-				let tagged = TaggedPtr::number(n);
-				Some(TaggedCellPtr::new(tagged))
-			}
-			Literal::String(s) => {
-				let raw = self.heap.alloc(Text::from(s)).ok()?;
-				let tagged = TaggedPtr::object(raw.to_void());
-				Some(TaggedCellPtr::new(tagged))
-			}
+			Literal::Number(n) => self
+				.tape
+				.literals
+				.alloc(n)
+				.ok()
+				.map(|x| TaggedCellPtr::new(TaggedPtr::from(FatPtr::from(x)))),
+			Literal::String(s) => self
+				.tape
+				.alloc_tagged(Text::from(s))
+				.ok()
+				.map(|x| TaggedCellPtr::new(TaggedPtr::from(FatPtr::from(x)))),
 		}
 	}
 
-	pub fn new_with(heap: &'mem StickyImmixHeap<LiteralHeader>) -> ROData<'mem> {
-		Self { heap }
+	fn get_tape(&'memory self) -> &'memory Tape {
+		self.tape
+	}
+
+	pub fn new(mem: &'memory Memory) -> Self {
+		Self { tape: &mem.tape }
 	}
 }
 
-type TapeMap = HashMap<ArraySize, TaggedCellPtr, BuildFxHasher>;
+type TapeMap = HashMap<ArraySize, TaggedPtr, BuildFxHasher>;
 
 #[derive(Clone)]
 pub struct RuntimeTape {
@@ -258,7 +406,7 @@ impl RuntimeTape {
 		}
 	}
 
-	pub fn get_values(&self, centered: Option<i32>) -> Vec<(ArraySize, &TaggedCellPtr)> {
+	pub fn get_values(&self, centered: Option<i32>) -> Vec<(ArraySize, &TaggedPtr)> {
 		let base = self.values_right.iter().map(|x| (*x.0, x.1));
 
 		if let Some(idx) = centered {
@@ -284,7 +432,7 @@ impl RuntimeTape {
 		}
 	}
 
-	pub fn get_pointer(&self, idx: i32) -> Option<&TaggedCellPtr> {
+	fn get_pointer(&self, idx: i32) -> Option<&TaggedPtr> {
 		let (container, idx) = self.container(idx);
 		container.get(&idx)
 	}
@@ -312,20 +460,20 @@ impl RuntimeTape {
 
 	pub fn set_value(
 		&mut self,
-		guard: &MutatorView,
+		guard: &MutatorView<'_>,
 		val: super::Value,
 	) -> Result<(), RuntimeError> {
 		let (container, idx) = self.container_mut(self.cursor);
 		guard.get_tape().upsert_value(idx, val, container)
 	}
 
-	pub fn clone_into(&self, idx: i32, values_within: ArraySize) -> Self {
+	pub fn clone_into(&self, idx: i32, values_within: ArraySize) -> RuntimeTape {
 		let left: TapeMap = HashMap::with_hasher(BuildFxHasher {});
 		let mut right: TapeMap = HashMap::with_hasher(BuildFxHasher {});
 
 		for i in 0..values_within {
 			if let Some(x) = self.get_pointer(idx + i.cast_signed()) {
-				right.insert(i, x.clone());
+				right.insert(i, *x);
 			}
 		}
 
@@ -340,125 +488,5 @@ impl RuntimeTape {
 impl Default for RuntimeTape {
 	fn default() -> Self {
 		Self::new()
-	}
-}
-
-struct Tape {
-	heap: StickyImmixHeap<TypeHeader>,
-}
-
-impl Tape {
-	#[must_use]
-	fn new() -> Self {
-		let heap: StickyImmixHeap<TypeHeader> = StickyImmixHeap::new();
-		Self { heap }
-	}
-
-	fn alloc<T>(&self, object: T) -> Result<RawPtr<T>, RuntimeError>
-	where
-		T: AllocObject<TypeList>,
-	{
-		Ok(self.heap.alloc(object)?)
-	}
-
-	fn alloc_tagged<T>(&self, object: T) -> Result<TaggedPtr, RuntimeError>
-	where
-		FatPtr: From<RawPtr<T>>,
-		T: AllocObject<TypeList>,
-	{
-		Ok(TaggedPtr::from(FatPtr::from(self.alloc(object)?)))
-	}
-
-	pub fn get_value(
-		&self,
-		idx: ArraySize,
-		guard: &dyn MutatorScope,
-		map: &HashMap<ArraySize, TaggedCellPtr, BuildFxHasher>,
-	) -> Option<super::Value> {
-		let ptr = map.get(&idx)?;
-		let value = ptr.get(guard).get_value().into();
-		Some(value)
-	}
-
-	pub fn upsert_value(
-		&self,
-		idx: ArraySize,
-		value: super::Value,
-		map: &mut HashMap<ArraySize, TaggedCellPtr, BuildFxHasher>,
-	) -> Result<(), RuntimeError> {
-		let ptr: TaggedPtr = match value {
-			super::Value::String(s) => {
-				let text = Text::from(s);
-				self.alloc_tagged(text)?
-			}
-			super::Value::Err(e) => {
-				let text = Text::from(e.to_string());
-				self.alloc_tagged(text)?
-			}
-			super::Value::FiveMinuteCodingAdventure(f) => self.alloc_tagged(f)?,
-			super::Value::Number(n) => self.alloc_tagged(n)?,
-			super::Value::Boolean(b) => self.alloc_tagged(b)?,
-			super::Value::Nil => self.alloc_tagged(Nil {})?,
-		};
-
-		if let Some(val) = map.get_mut(&idx) {
-			*val = TaggedCellPtr::new(ptr);
-		} else {
-			map.insert(idx, TaggedCellPtr::new(ptr));
-		}
-
-		Ok(())
-	}
-}
-
-impl From<AllocError> for RuntimeError {
-	fn from(value: AllocError) -> Self {
-		RuntimeError::AllocError(value.to_string())
-	}
-}
-
-pub struct MutatorView<'memory> {
-	tape: Tape,
-	literals: ROData<'memory>,
-}
-
-impl MutatorScope for MutatorView<'_> {}
-
-impl<'memory> MutatorView<'memory> {
-	pub fn alloc<T>(&self, object: T) -> Result<ScopedPtr<'_, T>, RuntimeError>
-	where
-		T: AllocObject<TypeList>,
-	{
-		Ok(ScopedPtr::new(
-			self,
-			self.tape.alloc(object)?.scoped_ref(self),
-		))
-	}
-
-	pub fn alloc_tagged<T>(&self, object: T) -> Result<TaggedScopedPtr<'_>, RuntimeError>
-	where
-		T: AllocObject<TypeList>,
-		FatPtr: From<RawPtr<T>>,
-	{
-		let raw = self.tape.alloc_tagged(object)?;
-		Ok(TaggedScopedPtr::new(self, raw))
-	}
-
-	fn get_tape(&'memory self) -> &'memory Tape {
-		&self.tape
-	}
-
-	pub fn get_data(&self) -> &'memory ROData<'_> {
-		&self.literals
-	}
-
-	pub fn new_with(literals: &'memory StickyImmixHeap<LiteralHeader>) -> Self {
-		let tape = Tape::new();
-		let rodata = ROData::new_with(literals);
-
-		Self {
-			tape,
-			literals: rodata,
-		}
 	}
 }
